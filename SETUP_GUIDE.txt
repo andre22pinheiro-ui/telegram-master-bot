@@ -1,0 +1,223 @@
+================================================================================
+   GUIA DE CONFIGURAÇÃO — BOT ORQUESTRADOR TELEGRAM (Master-Worker)
+   Projeto: telegram-master-bot | Autor: André Pinheiro
+================================================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PARTE 1 — CONFIGURAÇÃO DO BOT NO @BOTFATHER (Telegram)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Abre o Telegram e procura por @BotFather
+2. Envia o comando: /newbot
+3. Escolhe um nome para o bot (ex: "André Assistente")
+4. Escolhe um username único (ex: "andrePinheirobot")
+5. O BotFather devolve o TOKEN — guarda-o!
+   Ex: 9048099830:AAHKIWqN36KTnePUcqk-LaMq7pJGBukCDTU
+
+COMANDOS ÚTEIS NO BOTFATHER:
+  /setcommands — Definir atalhos de comandos visíveis no bot
+  /setdescription — Descrição do bot
+  /setabouttext — Texto "Sobre"
+  /setuserpic — Foto de perfil do bot
+
+COMANDOS SUGERIDOS (copia e cola no /setcommands):
+  start - Iniciar o assistente
+  ajuda - Ver todos os comandos
+  projetos - Listar repositórios GitHub
+  criar_app - Criar novo repositório
+  rota - Calcular rota de pesados
+  tacografo - Verificar limites de tacógrafo
+  avaliacao - Avaliar imóvel por m²
+  compras - Lista de compras
+  nota - Guardar nota
+  tarefa - Adicionar tarefa
+  briefing - Resumo do dia
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PARTE 2 — OBTER O TEU CHAT ID
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Método 1 (recomendado):
+  1. Envia uma mensagem ao teu novo bot
+  2. Abre no browser:
+     https://api.telegram.org/bot<TOKEN>/getUpdates
+  3. Procura por "chat":{"id": NUMERO} — esse é o teu CHAT_ID
+
+Método 2:
+  1. Procura por @userinfobot no Telegram
+  2. Envia /start — devolve o teu ID diretamente
+
+O teu Chat ID atual: 950415577
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PARTE 3 — CONFIGURAÇÃO DO FICHEIRO .env
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Edita o ficheiro .env na raiz do projeto:
+
+  TELEGRAM_BOT_TOKEN_MASTER=<token do BotFather>
+  CHAT_ID_AUTORIZADO=950415577
+
+Variáveis opcionais (ativam funcionalidades extra):
+
+  GEMINI_API_KEY=<chave da Google AI Studio>
+    → Necessária para: análise imobiliária, assistente dev, briefings inteligentes
+    → Obter em: https://aistudio.google.com/app/apikey
+
+  ORS_API_KEY=<chave do OpenRouteService>
+    → Necessária para: calcular rotas de pesados (/rota)
+    → Obter em: https://openrouteservice.org/dev/#/signup (gratuito)
+
+  GITHUB_TOKEN=<Personal Access Token do GitHub>
+    → Necessário para: listar e criar repositórios (/projetos, /criar_app)
+    → Obter em: GitHub → Settings → Developer Settings → Personal Access Tokens
+    → Permissões necessárias: repo (full access)
+
+  VERCEL_TOKEN=<token de deploy>
+    → Necessário para: deploy automático via Vercel (funcionalidade futura)
+    → Obter em: https://vercel.com/account/tokens
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PARTE 4 — INSTALAÇÃO E PRIMEIRO ARRANQUE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Pré-requisitos:
+  - Node.js 18+ instalado (verifica com: node --version)
+  - npm instalado (verifica com: npm --version)
+  - PM2 instalado globalmente (npm install -g pm2)
+
+Passos:
+
+  1. Navegar para o diretório do projeto:
+     cd C:\Users\Surface_Dpc\.gemini\antigravity\scratch\telegram-master-bot
+
+  2. Instalar dependências:
+     npm install
+
+  3. Configurar o .env:
+     - Copia .env.example para .env (já feito)
+     - Preenche os tokens necessários
+
+  4. Testar em modo de desenvolvimento:
+     node index.js
+     (deves ver: ✅ Bot ativo em modo de polling!)
+
+  5. Envia /start ao teu bot no Telegram para confirmar que funciona
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PARTE 5 — PRODUÇÃO COM PM2 (Execução Contínua)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PM2 garante que o bot reinicia automaticamente se crashar.
+
+Iniciar com PM2:
+  pm2 start ecosystem.config.cjs
+
+Verificar estado:
+  pm2 status
+
+Ver logs em tempo real:
+  pm2 logs telegram-master-bot
+
+Reiniciar:
+  pm2 restart telegram-master-bot
+
+Parar:
+  pm2 stop telegram-master-bot
+
+Guardar configuração para arranque automático com Windows:
+  pm2 save
+  pm2 startup
+
+IMPORTANTE — Arranque automático no Windows:
+  Após "pm2 startup", o PM2 indica o comando exato a executar.
+  Copia e executa esse comando como Administrador.
+  Depois executa: pm2 save
+  O PM2 reinicia agora automaticamente quando o Windows arranca.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PARTE 6 — DEPLOY NA NUVEM (Render.com — Gratuito)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Para correr 24/7 sem depender do teu PC:
+
+  1. Faz push do projeto para o GitHub:
+     git init
+     git add .
+     git commit -m "first commit"
+     git remote add origin https://github.com/SEU_USER/telegram-master-bot.git
+     git push -u origin main
+
+  2. Vai a https://render.com e cria conta
+  3. Clica em "New" → "Web Service"
+  4. Liga o repositório GitHub
+  5. Configurações:
+     - Runtime: Node
+     - Build Command: npm install
+     - Start Command: node index.js
+  6. Em "Environment Variables", adiciona todas as variáveis do .env
+  7. Clica Deploy
+
+  NOTA: O plano gratuito do Render.com hiberna após 15min de inatividade.
+  Usa o UptimeRobot para manter o bot sempre ativo:
+  → https://uptimerobot.com (monitor HTTP a cada 5min)
+  
+  IMPORTANTE: Em modo polling (como está configurado), o bot não precisa de
+  webhook — funciona diretamente com Render mesmo no plano gratuito.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PARTE 7 — ESTRUTURA DO PROJETO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+telegram-master-bot/
+├── index.js                    ← Ponto de entrada + bot Telegraf
+├── package.json                ← Dependências (telegraf, axios, dotenv)
+├── ecosystem.config.cjs        ← Configuração PM2
+├── .env                        ← Variáveis de ambiente (NÃO commitar!)
+├── .env.example                ← Template de variáveis
+├── SETUP_GUIDE.txt             ← Este ficheiro
+├── logs/                       ← Logs do PM2 (criado automaticamente)
+├── data/
+│   └── geral_data.json         ← Dados de notas/compras/tarefas (persistência)
+└── src/
+    ├── router/
+    │   └── intentRouter.js     ← Deteção de intenção por regex
+    ├── workers/
+    │   ├── worker_dev.js       ← Módulo de desenvolvimento
+    │   ├── worker_frotas.js    ← Módulo de gestão de frotas
+    │   ├── worker_immo.js      ← Módulo imobiliário
+    │   └── worker_geral.js     ← Módulo assistente pessoal
+    └── utils/
+        └── logger.js           ← Logger partilhado com timestamps
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PARTE 8 — TROUBLESHOOTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ERRO: "TELEGRAM_BOT_TOKEN_MASTER não definido"
+  → Verifica se o ficheiro .env existe e tem o token correto
+
+ERRO: "409 Conflict: terminated by other getUpdates request"
+  → Tens o bot a correr em dois lugares ao mesmo tempo
+  → Para uma das instâncias (pm2 stop ou Ctrl+C no terminal)
+
+ERRO: "Cannot find module"
+  → Certifica-te que fizeste "npm install" no diretório do projeto
+  → Verifica que estás no diretório correto (cd telegram-master-bot)
+
+ERRO: "403 Forbidden: bot was blocked by the user"
+  → O utilizador bloqueou o bot — vai ao Telegram e desbloqueia
+
+ERRO ORS: "403 Forbidden"
+  → O ORS_API_KEY está inválido ou expirado
+  → Renova em https://openrouteservice.org
+
+BOT NÃO RESPONDE:
+  → Verifica pm2 status (deve mostrar "online")
+  → Verifica pm2 logs para erros
+  → Confirma que o CHAT_ID_AUTORIZADO é o correto
+
+================================================================================
+   FIM DO GUIA | telegram-master-bot v1.0.0
+================================================================================
+
