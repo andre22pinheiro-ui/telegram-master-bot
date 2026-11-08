@@ -14,15 +14,15 @@ const log = createLogger('Master');
 
 // ─── Validação de Configuração ───────────────────────────────────────────────
 
-const TOKEN = process.env.TELEGRAM_BOT_TOKEN_MASTER;
-const CHAT_ID_AUTORIZADO = process.env.CHAT_ID_AUTORIZADO;
+const TOKEN = process.env.TELEGRAM_BOT_TOKEN_MASTER || process.env.TELEGRAM_MASTER_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+const CHAT_ID_AUTORIZADO = process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
 
 if (!TOKEN) {
-  log.error('TELEGRAM_BOT_TOKEN_MASTER não definido no .env');
+  log.error('TELEGRAM_BOT_TOKEN_MASTER (ou TELEGRAM_MASTER_TOKEN) não definido no .env');
   process.exit(1);
 }
 if (!CHAT_ID_AUTORIZADO) {
-  log.error('CHAT_ID_AUTORIZADO não definido no .env');
+  log.error('CHAT_ID_AUTORIZADO (ou AUTHORIZED_CHAT_ID) não definido no .env');
   process.exit(1);
 }
 
@@ -174,11 +174,24 @@ server.listen(PORT, () => {
   log.info(`Servidor HTTP ativo na porta ${PORT} (health check para Render.com)`);
 });
 
-log.info('A iniciar o Bot Orquestrador Telegram...');
-bot.launch({ allowedUpdates: ['message', 'callback_query'] })
-  .then(() => log.info('✅ Bot ativo em modo de polling!'))
-  .catch((err) => {
-    log.error('Falha ao iniciar o bot', err?.message || err);
-    process.exit(1);
-  });
+async function startBotWithRetry(retries = 5, delayMs = 5000) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      log.info(`A iniciar o Bot Orquestrador Telegram (tentativa ${attempt}/${retries})...`);
+      await bot.launch({ allowedUpdates: ['message', 'callback_query'] });
+      log.info('✅ Bot ativo e a escutar com sucesso no Telegram!');
+      return;
+    } catch (err) {
+      log.error(`⚠️ Tentativa ${attempt} falhou: ${err?.message || err}`);
+      if (attempt < retries) {
+        log.info(`A aguardar ${delayMs / 1000}s antes de tentar novamente...`);
+        await new Promise((r) => setTimeout(r, delayMs));
+      } else {
+        log.error('Todas as tentativas de ligação ao Telegram falharam. O servidor HTTP /health continua ativo.');
+      }
+    }
+  }
+}
+
+startBotWithRetry();
 
