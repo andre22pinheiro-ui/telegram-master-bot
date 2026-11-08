@@ -130,7 +130,7 @@ bot.catch((err, ctx) => {
 botInstances.push({ name: 'Master (@AndrePinheirobot)', bot });
 
 // 2. WORKER DEV (@DesSofBot)
-const DEV_TOKEN = process.env.TELEGRAM_DEV_TOKEN;
+const DEV_TOKEN = process.env.TELEGRAM_DEV_TOKEN || process.env.TELEGRAM_BOT_TOKEN_DEV || process.env.DEV_TOKEN;
 if (DEV_TOKEN && DEV_TOKEN.trim()) {
   const botDev = new Telegraf(DEV_TOKEN.trim());
   botDev.use(authMiddleware);
@@ -152,7 +152,7 @@ if (DEV_TOKEN && DEV_TOKEN.trim()) {
 }
 
 // 3. WORKER FROTAS (@TrasFrotBot)
-const FROTAS_TOKEN = process.env.TELEGRAM_FROTAS_TOKEN;
+const FROTAS_TOKEN = process.env.TELEGRAM_FROTAS_TOKEN || process.env.TELEGRAM_BOT_TOKEN_FROTAS || process.env.FROTAS_TOKEN;
 if (FROTAS_TOKEN && FROTAS_TOKEN.trim()) {
   const botFrotas = new Telegraf(FROTAS_TOKEN.trim());
   botFrotas.use(authMiddleware);
@@ -169,7 +169,7 @@ if (FROTAS_TOKEN && FROTAS_TOKEN.trim()) {
 }
 
 // 4. WORKER IMMO (@ppspppBot)
-const IMMO_TOKEN = process.env.TELEGRAM_IMMO_TOKEN;
+const IMMO_TOKEN = process.env.TELEGRAM_IMMO_TOKEN || process.env.TELEGRAM_BOT_TOKEN_IMMO || process.env.IMMO_TOKEN;
 if (IMMO_TOKEN && IMMO_TOKEN.trim()) {
   const botImmo = new Telegraf(IMMO_TOKEN.trim());
   botImmo.use(authMiddleware);
@@ -186,7 +186,7 @@ if (IMMO_TOKEN && IMMO_TOKEN.trim()) {
 }
 
 // 5. WORKER PESSOAL (@AndTrarBOT)
-const PESSOAL_TOKEN = process.env.TELEGRAM_PESSOAL_TOKEN;
+const PESSOAL_TOKEN = process.env.TELEGRAM_PESSOAL_TOKEN || process.env.TELEGRAM_BOT_TOKEN_PESSOAL || process.env.PESSOAL_TOKEN;
 if (PESSOAL_TOKEN && PESSOAL_TOKEN.trim()) {
   const botPessoal = new Telegraf(PESSOAL_TOKEN.trim());
   botPessoal.use(authMiddleware);
