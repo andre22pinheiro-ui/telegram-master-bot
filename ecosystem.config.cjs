@@ -8,10 +8,12 @@ module.exports = {
       interpreter_args: '--experimental-vm-modules',
       cwd: __dirname,
       instances: 1,
+      exec_mode: 'fork',
       autorestart: true,
       watch: false,
-      max_memory_restart: '400M',
+      max_memory_restart: '350M',
       restart_delay: 3000,
+      kill_timeout: 4000,
       max_restarts: 20,
       env: {
         NODE_ENV: 'production',

@@ -12,6 +12,8 @@ import { VERCEL_APPS, buildTelegramAppsKeyboard, formatAllVercelAppsMarkdown } f
 import { handleFamilyApi } from './src/shared/familyRoutes.js';
 import { analyzeImageBuffer, downloadTelegramPhoto } from './src/shared/multimodalVision.js';
 import { uploadToCloudinary } from './src/shared/cloudinaryCdn.js';
+import { safeExecute } from './src/utils/resilience.js';
+import { cleanChatMiddleware } from './src/shared/security.js';
 import { existsSync, readFileSync, mkdirSync } from 'fs';
 import path from 'path';
 
@@ -153,21 +155,17 @@ async function rotear(ctx, text) {
   const intent = detectIntent(text);
   log.info(`Roteando para worker: ${intent}`);
 
-  let resposta;
-  try {
-    switch (intent) {
-      case 'DEV':    resposta = await handleDev(text);    break;
-      case 'FROTAS': resposta = await handleFrotas(text); break;
-      case 'IMMO':   resposta = await handleImmo(text);   break;
-      case 'GERAL':
-      default:       resposta = await handleGeral(text);  break;
-    }
-  } catch (err) {
-    log.error(`Erro no worker ${intent}`, err.message);
-    resposta = `⚠️ Ocorreu um erro interno no módulo *${intent}*. Tenta novamente.`;
+  switch (intent) {
+    case 'DEV':
+      return await safeExecute(() => handleDev(text), 'Dev (Engenharia)', 8000);
+    case 'FROTAS':
+      return await safeExecute(() => handleFrotas(text), 'Frotas (RotaBus)', 8000);
+    case 'IMMO':
+      return await safeExecute(() => handleImmo(text), 'Immo (Avaliação)', 8000);
+    case 'GERAL':
+    default:
+      return await safeExecute(() => handleGeral(text), 'Pessoal & Família', 8000);
   }
-
-  return resposta;
 }
 
 // ─── Instâncias Ativas de Bots ───────────────────────────────────────────────
@@ -176,6 +174,7 @@ const botInstances = [];
 // 1. MASTER BOT (@AndrePinheirobot) ───────────────────────────────────────────
 const bot = new Telegraf(TOKEN);
 bot.use(authMiddleware);
+bot.use(cleanChatMiddleware);
 
 // Configurar o botão permanente "Mini App" no chat
 bot.telegram.setChatMenuButton({
@@ -246,13 +245,13 @@ bot.command('carolina', async (ctx) => {
 
 bot.command('briefing', async (ctx) => {
   await ctx.sendChatAction('typing');
-  const resp = await handleGeral('/briefing');
+  const resp = await safeExecute(() => handleGeral('/briefing'), 'Briefing', 8000);
   await sendReply(ctx, resp, getMasterKeyboard());
 });
 
 bot.command('rota', async (ctx) => {
   await ctx.sendChatAction('typing');
-  const resp = await handleFrotas(ctx.message.text);
+  const resp = await safeExecute(() => handleFrotas(ctx.message.text), 'RotaBus GPS', 8000);
   await sendReply(ctx, resp, Markup.inlineKeyboard([
     [Markup.webApp('🚌 Abrir no RotaBus GPS', VERCEL_APPS.rotabus.url)],
     [Markup.url('📲 Descarregar APK Android', VERCEL_APPS.rotabus.apkUrl)]
@@ -260,7 +259,7 @@ bot.command('rota', async (ctx) => {
 });
 
 bot.command('tacografo', async (ctx) => {
-  const resp = await handleFrotas(ctx.message.text);
+  const resp = await safeExecute(() => handleFrotas(ctx.message.text), 'Tacógrafo', 8000);
   await sendReply(ctx, resp, Markup.inlineKeyboard([
     [Markup.callback('⏱️ 4.5h Condução', 'btn_tacho_45'), Markup.callback('⏱️ 9.0h Diário', 'btn_tacho_90')],
     [Markup.webApp('🚌 RotaBus Frotas', VERCEL_APPS.rotabus.url)]
@@ -269,13 +268,13 @@ bot.command('tacografo', async (ctx) => {
 
 bot.command('projetos', async (ctx) => {
   await ctx.sendChatAction('typing');
-  const resp = await handleDev('/projetos');
+  const resp = await safeExecute(() => handleDev('/projetos'), 'GitHub Dev', 8000);
   await sendReply(ctx, resp);
 });
 
 bot.command('avaliacao', async (ctx) => {
   await ctx.sendChatAction('typing');
-  const resp = await handleImmo(ctx.message.text);
+  const resp = await safeExecute(() => handleImmo(ctx.message.text), 'ImmoEval', 8000);
   await sendReply(ctx, resp, Markup.inlineKeyboard([
     [Markup.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)]
   ]));
@@ -452,6 +451,7 @@ const DEV_TOKEN = process.env.TELEGRAM_DEV_TOKEN || process.env.TELEGRAM_BOT_TOK
 if (DEV_TOKEN && DEV_TOKEN.trim()) {
   const botDev = new Telegraf(DEV_TOKEN.trim());
   botDev.use(authMiddleware);
+  botDev.use(cleanChatMiddleware);
 
   botDev.telegram.setChatMenuButton({
     menu_button: {
@@ -502,7 +502,7 @@ if (DEV_TOKEN && DEV_TOKEN.trim()) {
 
   botDev.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
-    const resp = await handleDev(ctx.message.text);
+    const resp = await safeExecute(() => handleDev(ctx.message.text), 'Dev (Engenharia)', 8000);
     await sendReply(ctx, resp);
   });
 
@@ -515,6 +515,7 @@ const FROTAS_TOKEN = process.env.TELEGRAM_FROTAS_TOKEN || process.env.TELEGRAM_B
 if (FROTAS_TOKEN && FROTAS_TOKEN.trim()) {
   const botFrotas = new Telegraf(FROTAS_TOKEN.trim());
   botFrotas.use(authMiddleware);
+  botFrotas.use(cleanChatMiddleware);
 
   botFrotas.telegram.setChatMenuButton({
     menu_button: {
@@ -583,7 +584,7 @@ if (FROTAS_TOKEN && FROTAS_TOKEN.trim()) {
 
   botFrotas.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
-    const resp = await handleFrotas(ctx.message.text);
+    const resp = await safeExecute(() => handleFrotas(ctx.message.text), 'Frotas (RotaBus)', 8000);
     await sendReply(ctx, resp);
   });
 
@@ -596,6 +597,7 @@ const IMMO_TOKEN = process.env.TELEGRAM_IMMO_TOKEN || process.env.TELEGRAM_BOT_T
 if (IMMO_TOKEN && IMMO_TOKEN.trim()) {
   const botImmo = new Telegraf(IMMO_TOKEN.trim());
   botImmo.use(authMiddleware);
+  botImmo.use(cleanChatMiddleware);
 
   botImmo.telegram.setChatMenuButton({
     menu_button: {
@@ -630,7 +632,7 @@ if (IMMO_TOKEN && IMMO_TOKEN.trim()) {
 
   botImmo.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
-    const resp = await handleImmo(ctx.message.text);
+    const resp = await safeExecute(() => handleImmo(ctx.message.text), 'Immo (Avaliação)', 8000);
     await sendReply(ctx, resp);
   });
 
@@ -643,6 +645,7 @@ const PESSOAL_TOKEN = process.env.TELEGRAM_PESSOAL_TOKEN || process.env.TELEGRAM
 if (PESSOAL_TOKEN && PESSOAL_TOKEN.trim()) {
   const botPessoal = new Telegraf(PESSOAL_TOKEN.trim());
   botPessoal.use(authMiddleware);
+  botPessoal.use(cleanChatMiddleware);
 
   botPessoal.telegram.setChatMenuButton({
     menu_button: {
@@ -704,7 +707,7 @@ if (PESSOAL_TOKEN && PESSOAL_TOKEN.trim()) {
 
   botPessoal.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
-    const resp = await handleGeral(ctx.message.text);
+    const resp = await safeExecute(() => handleGeral(ctx.message.text), 'Pessoal & Família', 8000);
     await sendReply(ctx, resp);
   });
 

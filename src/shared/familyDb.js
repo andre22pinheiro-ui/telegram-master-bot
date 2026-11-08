@@ -1,5 +1,5 @@
-// src/shared/familyDb.js — Base de dados persistente JSON para a Mini App Família e Bots
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+// src/shared/familyDb.js — Base de dados persistente JSON atómica para a Mini App Família e Bots
+import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -7,7 +7,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, '../../data');
 const DB_FILE = join(DATA_DIR, 'family_store.json');
 
+let memoryCache = null;
+
 function ensureStore() {
+  if (memoryCache) return memoryCache;
   try {
     if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
     if (!existsSync(DB_FILE)) {
@@ -27,10 +30,13 @@ function ensureStore() {
           { id: '1', title: 'Ideia RotaBus', content: 'Manter sempre prioridade a autoestradas e conforto VIP', color_tag: 'emerald', created_by_name: 'André', created_at: new Date().toISOString() }
         ]
       };
-      writeFileSync(DB_FILE, JSON.stringify(initial, null, 2), 'utf8');
+      saveStore(initial);
+      memoryCache = initial;
       return initial;
     }
-    return JSON.parse(readFileSync(DB_FILE, 'utf8'));
+    const parsed = JSON.parse(readFileSync(DB_FILE, 'utf8'));
+    memoryCache = parsed;
+    return parsed;
   } catch (err) {
     console.error('[familyDb] Erro ao ler base de dados:', err);
     return { shopping: [], tasks: [], baby_logs: [], notes: [] };
@@ -40,10 +46,13 @@ function ensureStore() {
 function saveStore(data) {
   try {
     if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
+    const tmpFile = `${DB_FILE}.tmp`;
+    writeFileSync(tmpFile, JSON.stringify(data, null, 2), 'utf8');
+    renameSync(tmpFile, DB_FILE);
+    memoryCache = data;
     return true;
   } catch (err) {
-    console.error('[familyDb] Erro ao gravar dados:', err);
+    console.error('[familyDb] Erro ao gravar dados atomicamente:', err);
     return false;
   }
 }

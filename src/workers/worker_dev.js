@@ -17,7 +17,7 @@ async function askGemini(prompt) {
     const res = await axios.post(url, {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { temperature: 0.4, maxOutputTokens: 1024 },
-    }, { timeout: 15000 });
+    }, { timeout: 7000 });
     return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
   } catch (err) {
     log.error('Gemini API falhou', err.message);
@@ -30,7 +30,7 @@ async function listGithubRepos() {
   try {
     const res = await axios.get('https://api.github.com/user/repos?per_page=12&sort=updated', {
       headers: { Authorization: `Bearer ${GITHUB_TOKEN}`, Accept: 'application/vnd.github+json' },
-      timeout: 10000,
+      timeout: 6000,
     });
     return res.data.map(r => `• [${r.name}](${r.html_url}) — ${r.description || 'sem descrição'}`).join('\n');
   } catch (err) {
@@ -46,7 +46,7 @@ async function createGithubRepo(name, description = '') {
       name, description, private: false, auto_init: true,
     }, {
       headers: { Authorization: `Bearer ${GITHUB_TOKEN}`, Accept: 'application/vnd.github+json' },
-      timeout: 10000,
+      timeout: 6000,
     });
     return { url: res.data.html_url, clone: res.data.clone_url };
   } catch (err) {

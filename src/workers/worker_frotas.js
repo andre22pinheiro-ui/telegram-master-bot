@@ -11,7 +11,7 @@ const ORS_API_KEY = process.env.ORS_API_KEY || '';
 async function geocode(place) {
   try {
     const url = `https://api.openrouteservice.org/geocode/search?api_key=${ORS_API_KEY}&text=${encodeURIComponent(place)}&boundary.country=PT&size=1`;
-    const res = await axios.get(url, { timeout: 10000 });
+    const res = await axios.get(url, { timeout: 6000 });
     const coords = res.data?.features?.[0]?.geometry?.coordinates;
     if (!coords) return null;
     return { lon: coords[0], lat: coords[1] };
@@ -54,7 +54,7 @@ async function calcularRota(origem, destino, perfil = 'driving-hgv') {
       instructions: false,
     }, {
       headers: { Authorization: ORS_API_KEY, 'Content-Type': 'application/json' },
-      timeout: 15000,
+      timeout: 7000,
     });
 
     const summary = res.data?.routes?.[0]?.summary;

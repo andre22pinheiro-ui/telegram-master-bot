@@ -19,7 +19,8 @@ export async function uploadToCloudinary(buffer, filename = "telegram_upload") {
     const res = await fetch(url, {
       method: "POST",
       body: body.toString(),
-      headers: { "Content-Type": "application/x-www-form-urlencoded" }
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      signal: AbortSignal.timeout(6000)
     });
 
     const data = await res.json();
