@@ -1,11 +1,11 @@
-// src/workers/worker_dev.js — Módulo de Desenvolvimento (GitHub + Vercel)
+// src/workers/worker_dev.js — Módulo de Desenvolvimento, GitHub, Vercel e Cloud
 import axios from 'axios';
 import { createLogger } from '../utils/logger.js';
+import { VERCEL_APPS, formatAllVercelAppsMarkdown } from '../shared/appsCatalog.js';
 
 const log = createLogger('WorkerDev');
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
-const VERCEL_TOKEN = process.env.VERCEL_TOKEN || '';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -28,7 +28,7 @@ async function askGemini(prompt) {
 async function listGithubRepos() {
   if (!GITHUB_TOKEN) return null;
   try {
-    const res = await axios.get('https://api.github.com/user/repos?per_page=10&sort=updated', {
+    const res = await axios.get('https://api.github.com/user/repos?per_page=12&sort=updated', {
       headers: { Authorization: `Bearer ${GITHUB_TOKEN}`, Accept: 'application/vnd.github+json' },
       timeout: 10000,
     });
@@ -60,12 +60,12 @@ async function createGithubRepo(name, description = '') {
 async function handleProjetos() {
   const repos = await listGithubRepos();
   if (!repos) return '⚠️ Não consegui aceder ao GitHub. Verifica o `GITHUB_TOKEN` no `.env`.';
-  return `📂 *Últimos Repositórios GitHub:*\n\n${repos}`;
+  return `📂 *Últimos Repositórios GitHub:*\n\n${repos}\n\n_Dica: Usa \`/criar_app Nome\` para iniciar um novo repo!_`;
 }
 
 async function handleCriarApp(args) {
   if (!args || args.trim().length < 2) {
-    return '📝 *Criar App*\n\nUsa o formato:\n`/criar_app NomeDoProjeto Descrição opcional`\n\nExemplo:\n`/criar_app meu-site Landing page pessoal`';
+    return '📝 *Criar Novo Repositório GitHub*\n\nFormato:\n`/criar_app NomeDoProjeto Descrição`\n\nExemplo:\n`/criar_app nova-dashboard Sistema de métricas web`';
   }
   const parts = args.trim().split(' ');
   const name = parts[0].replace(/[^a-zA-Z0-9_-]/g, '-');
@@ -74,34 +74,44 @@ async function handleCriarApp(args) {
   const result = await createGithubRepo(name, description);
   if (result.error) return `❌ Erro ao criar repositório: ${result.error}`;
 
-  return `✅ *Repositório criado com sucesso!*\n\n📦 Nome: \`${name}\`\n🔗 URL: ${result.url}\n📋 Clone: \`git clone ${result.clone}\`\n\n_Deploy no Vercel: faz push e liga o repo em vercel.com_`;
+  return `✅ *Repositório criado no GitHub!*\n\n📦 Nome: \`${name}\`\n🔗 URL: ${result.url}\n📋 Clone: \`git clone ${result.clone}\`\n\n_Para deploy: liga o repo na consola Vercel ou Render._`;
+}
+
+function handleApps() {
+  return formatAllVercelAppsMarkdown();
+}
+
+function handleApks() {
+  return (
+    `📲 *Distribuição de Ficheiros APK Compilados:*\n\n` +
+    `🚌 *RotaBus (Navegação Pesados & Conforto VIP)*\n` +
+    `• Versão: v1.0.0 (Anti-Sinuosidade & Tacógrafo)\n` +
+    `• Arquiteturas: ARM64-v8a + ARMv7 (Android Nativo)\n` +
+    `• Link Direto: [https://smooth-bus-routes.vercel.app/rotabus.apk](https://smooth-bus-routes.vercel.app/rotabus.apk)\n` +
+    `• Atalho: [https://smooth-bus-routes.vercel.app/apk](https://smooth-bus-routes.vercel.app/apk)\n\n` +
+    `_Basta tocar no link no telemóvel para instalar diretamente!_`
+  );
 }
 
 async function handleCode(userMessage) {
-  const prompt = `Responde em Português de Portugal. ${userMessage}\n\nSe for código, usa blocos de código markdown. Resposta concisa e prática.`;
+  const prompt = `Responde em Português de Portugal como um Engenheiro de Software Senior e Arquiteto Cloud. Pergunta:\n${userMessage}\n\nResponde de forma clara, usando blocos de código markdown quando apropriado.`;
   const answer = await askGemini(prompt);
-  if (!answer) return '⚠️ Gemini indisponível. Configura `GEMINI_API_KEY` no `.env`.';
-  return `🤖 *Assistente Dev:*\n\n${answer}`;
+  if (!answer) return '⚠️ Assistente de código temporariamente indisponível. Configura `GEMINI_API_KEY`.';
+  return `💻 *Engenharia de Software & Cloud:*\n\n${answer}`;
 }
 
 // ─── Dispatcher Principal ────────────────────────────────────────────────────
 
-/**
- * Processa uma mensagem do utilizador no contexto DEV.
- * @param {string} text - Mensagem completa
- * @returns {Promise<string>} Resposta formatada
- */
 export async function handle(text) {
   log.info('Processando pedido DEV', { text: text.substring(0, 60) });
-
   const lower = text.trim().toLowerCase();
 
-  if (/^\/(projetos?|github)/.test(lower)) return handleProjetos();
+  if (/^\/(projetos?|github|repos?)\b/.test(lower)) return handleProjetos();
   if (/^\/criar_app/.test(lower)) return handleCriarApp(text.replace(/^\/criar_app\s*/i, ''));
+  if (/^\/(apps?|links?|catalogo|catalogo_apps|vercel)\b/.test(lower)) return handleApps();
+  if (/^\/(apks?|download_apk|android)\b/.test(lower)) return handleApks();
 
-  // Qualquer outra coisa do domínio dev → Gemini
   return handleCode(text);
 }
 
 export default { handle };
-

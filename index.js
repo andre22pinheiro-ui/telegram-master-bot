@@ -1,13 +1,15 @@
-// index.js — Ponto de entrada principal do Bot Orquestrador Telegram
+// index.js — Bot Orquestrador Telegram & Cockpit de Mini Apps na Nuvem
 import 'dotenv/config';
 import http from 'http';
-import { Telegraf } from 'telegraf';
+import { Telegraf, Markup } from 'telegraf';
 import { detectIntent } from './src/router/intentRouter.js';
 import { handle as handleDev } from './src/workers/worker_dev.js';
 import { handle as handleFrotas } from './src/workers/worker_frotas.js';
 import { handle as handleImmo } from './src/workers/worker_immo.js';
 import { handle as handleGeral } from './src/workers/worker_geral.js';
 import { createLogger } from './src/utils/logger.js';
+import { VERCEL_APPS, buildTelegramAppsKeyboard, formatAllVercelAppsMarkdown } from './src/shared/appsCatalog.js';
+import { handleFamilyApi } from './src/shared/familyRoutes.js';
 import { mkdirSync } from 'fs';
 
 const log = createLogger('Master');
@@ -18,11 +20,11 @@ const TOKEN = process.env.TELEGRAM_BOT_TOKEN_MASTER || process.env.TELEGRAM_MAST
 const CHAT_ID_AUTORIZADO = process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
 
 if (!TOKEN) {
-  log.error('TELEGRAM_BOT_TOKEN_MASTER (ou TELEGRAM_MASTER_TOKEN) não definido no .env');
+  log.error('TELEGRAM_BOT_TOKEN_MASTER não definido no .env');
   process.exit(1);
 }
 if (!CHAT_ID_AUTORIZADO) {
-  log.error('CHAT_ID_AUTORIZADO (ou AUTHORIZED_CHAT_ID) não definido no .env');
+  log.error('CHAT_ID_AUTORIZADO não definido no .env');
   process.exit(1);
 }
 
@@ -37,11 +39,68 @@ const authMiddleware = async (ctx, next) => {
 
   if (chatId !== CHAT_ID_AUTORIZADO && userId !== CHAT_ID_AUTORIZADO) {
     log.warn('Acesso não autorizado bloqueado', { chatId, userId });
-    await ctx.reply('⛔ Acesso não autorizado.');
+    await ctx.reply('⛔ Acesso restrito ao proprietário do sistema.');
     return;
   }
   return next();
 };
+
+// ─── Teclados Interativos Partilhados ─────────────────────────────────────────
+
+function getMasterKeyboard() {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.webApp('🏡 1. Abrir Mini App Família', VERCEL_APPS.familiar.url)
+    ],
+    [
+      Markup.button.webApp('🚌 2. RotaBus VIP (Web)', VERCEL_APPS.rotabus.url),
+      Markup.button.url('📲 Descarregar APK', VERCEL_APPS.rotabus.apkUrl)
+    ],
+    [
+      Markup.button.webApp('⚽ 3. MatchPro', VERCEL_APPS.matchpro.url),
+      Markup.button.webApp('🏗️ 4. Pladur-Pro 3D', VERCEL_APPS.pladur.url)
+    ],
+    [
+      Markup.button.callback('🛒 Compras', 'act_compras'),
+      Markup.button.callback('📋 Tarefas', 'act_tarefas'),
+      Markup.button.callback('👧 Carolina', 'act_carolina')
+    ],
+    [
+      Markup.button.callback('🚛 Rotas & Tacógrafo', 'act_frotas'),
+      Markup.button.callback('🏠 Avaliação Immo', 'act_immo')
+    ],
+    [
+      Markup.button.callback('💻 Dev & Repos', 'act_dev'),
+      Markup.button.callback('☀️ Briefing de Hoje', 'act_briefing')
+    ],
+    [
+      Markup.button.callback('🌐 Todas as 9 Mini Apps', 'act_all_apps')
+    ]
+  ]);
+}
+
+// ─── Helpers de Envio ────────────────────────────────────────────────────────
+
+function splitText(text, maxLen = 4000) {
+  const chunks = [];
+  let remaining = text;
+  while (remaining.length > 0) {
+    if (remaining.length <= maxLen) { chunks.push(remaining); break; }
+    let cut = remaining.lastIndexOf('\n', maxLen);
+    if (cut <= 0) cut = maxLen;
+    chunks.push(remaining.substring(0, cut));
+    remaining = remaining.substring(cut).trimStart();
+  }
+  return chunks;
+}
+
+async function sendReply(ctx, text, extra = null) {
+  const chunks = splitText(text);
+  for (let i = 0; i < chunks.length; i++) {
+    const isLast = i === chunks.length - 1;
+    await ctx.replyWithMarkdown(chunks[i], isLast && extra ? extra : undefined);
+  }
+}
 
 // ─── Roteador de Intenções do Master ─────────────────────────────────────────
 
@@ -66,42 +125,256 @@ async function rotear(ctx, text) {
   return resposta;
 }
 
-// ─── Helpers de Envio (chunking para limite 4096 chars) ─────────────────────
-
-function splitText(text, maxLen = 4000) {
-  const chunks = [];
-  let remaining = text;
-  while (remaining.length > 0) {
-    if (remaining.length <= maxLen) { chunks.push(remaining); break; }
-    let cut = remaining.lastIndexOf('\n', maxLen);
-    if (cut <= 0) cut = maxLen;
-    chunks.push(remaining.substring(0, cut));
-    remaining = remaining.substring(cut).trimStart();
-  }
-  return chunks;
-}
-
-async function sendReply(ctx, text) {
-  const chunks = splitText(text);
-  for (const chunk of chunks) {
-    await ctx.replyWithMarkdown(chunk);
-  }
-}
-
 // ─── Instâncias Ativas de Bots ───────────────────────────────────────────────
 const botInstances = [];
 
-// 1. MASTER BOT (@AndrePinheirobot)
+// 1. MASTER BOT (@AndrePinheirobot) ───────────────────────────────────────────
 const bot = new Telegraf(TOKEN);
 bot.use(authMiddleware);
 
+// Configurar o botão permanente "Mini App" no chat
+bot.telegram.setChatMenuButton({
+  menu_button: {
+    type: 'web_app',
+    text: '📱 Cockpit',
+    web_app: { url: VERCEL_APPS.familiar.url }
+  }
+}).catch(() => {});
+
 bot.start(async (ctx) => {
   const nome = ctx.from?.first_name || 'André';
-  await sendReply(ctx, `👋 Olá, *${nome}*!\n\nSou o teu Assistente Orquestrador Telegram.\n\n🧭 *Módulos Ativos na Nuvem:*\n\n🖥️ *Dev* — Código, GitHub, deploy\n🚛 *Frotas* — Rotas de pesados, tacógrafo\n🏠 *Imobiliário* — Avaliação por m² em Amarante\n📋 *Geral* — Notas, compras, tarefas, briefing\n\nFala comigo normalmente ou usa um dos comandos abaixo!\n\n━━━━━━━━━━━\n/ajuda — ver todos os comandos`);
+  const msg =
+    `👋 Olá, *${nome}*!\n\n` +
+    `Bem-vindo ao teu **Cockpit Master Telegram & Nuvem**.\n\n` +
+    `🚀 *Mini Apps e Módulos Integrados:*\n\n` +
+    `• 🏡 *Família & Carolina* — Compras partilhadas, tarefas, saúde e faltas\n` +
+    `• 🚌 *RotaBus & Frotas* — Navegação de autocarros, anti-sinuosidade e tacógrafo\n` +
+    `• ⚽ *MatchPro* — Jogos, scout tático e streaming\n` +
+    `• 🏗️ *Pladur-Pro 3D* — Orçamentos e modelo tridimensional\n` +
+    `• 🏠 *ImmoEval* — Avaliação imobiliária por m² em Amarante e Norte\n` +
+    `• 💻 *Dev & Cloud* — Gestão de repositórios GitHub e deploy\n\n` +
+    `👇 _Toca num botão abaixo para abrir a Mini App ou executar ações rápidas:_`;
+
+  await sendReply(ctx, msg, getMasterKeyboard());
+});
+
+bot.command(['menu', 'cockpit', 'painel'], async (ctx) => {
+  await sendReply(ctx, `🎛️ *Menu Principal de Controlo:*`, getMasterKeyboard());
+});
+
+bot.command(['apps', 'app', 'catalogo', 'vercel'], async (ctx) => {
+  const md = formatAllVercelAppsMarkdown();
+  await sendReply(ctx, md, buildTelegramAppsKeyboard());
+});
+
+bot.command(['apk', 'apks', 'download'], async (ctx) => {
+  const resp = await handleDev('/apks');
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.url('📲 Descarregar RotaBus APK', VERCEL_APPS.rotabus.apkUrl)],
+    [Markup.webApp('🚌 Abrir RotaBus Web', VERCEL_APPS.rotabus.url)]
+  ]));
+});
+
+bot.command('compras', async (ctx) => {
+  const resp = await handleGeral(ctx.message.text);
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.webApp('🛒 Abrir Compras na Mini App', VERCEL_APPS.familiar.url)],
+    [Markup.callback('🔄 Atualizar Lista', 'act_compras'), Markup.callback('🧹 Limpar Comprados', 'act_compras_limpar')]
+  ]));
+});
+
+bot.command('tarefas', async (ctx) => {
+  const resp = await handleGeral(ctx.message.text);
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.webApp('📋 Abrir Tarefas na Mini App', VERCEL_APPS.familiar.url)],
+    [Markup.callback('🔄 Atualizar Tarefas', 'act_tarefas')]
+  ]));
+});
+
+bot.command('carolina', async (ctx) => {
+  const resp = await handleGeral(ctx.message.text);
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.webApp('👧 Abrir Carolina na Mini App', VERCEL_APPS.familiar.url)],
+    [Markup.callback('🔄 Atualizar Registos', 'act_carolina')]
+  ]));
+});
+
+bot.command('briefing', async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const resp = await handleGeral('/briefing');
+  await sendReply(ctx, resp, getMasterKeyboard());
+});
+
+bot.command('rota', async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const resp = await handleFrotas(ctx.message.text);
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.webApp('🚌 Abrir no RotaBus GPS', VERCEL_APPS.rotabus.url)],
+    [Markup.url('📲 Descarregar APK Android', VERCEL_APPS.rotabus.apkUrl)]
+  ]));
+});
+
+bot.command('tacografo', async (ctx) => {
+  const resp = await handleFrotas(ctx.message.text);
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.callback('⏱️ 4.5h Condução', 'btn_tacho_45'), Markup.callback('⏱️ 9.0h Diário', 'btn_tacho_90')],
+    [Markup.webApp('🚌 RotaBus Frotas', VERCEL_APPS.rotabus.url)]
+  ]));
+});
+
+bot.command('projetos', async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const resp = await handleDev('/projetos');
+  await sendReply(ctx, resp);
+});
+
+bot.command('avaliacao', async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const resp = await handleImmo(ctx.message.text);
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)]
+  ]));
 });
 
 bot.command('ajuda', async (ctx) => {
-  await sendReply(ctx, `📖 *Comandos Disponíveis:*\n\n*🖥️ Desenvolvimento:*\n\`/projetos\` — listar repos GitHub\n\`/criar_app NOME\` — criar repositório\n\n*🚛 Frotas:*\n\`/rota ORIGEM para DESTINO\`\n\`/tacografo HORAS\`\n\n*🏠 Imobiliário:*\n\`/avaliacao ÁREA ZONA TIPOLOGIA ESTADO\`\nEx: \`/avaliacao 120 Amarante T3 bom\`\n\n*📋 Pessoal:*\n\`/compras\` — lista de compras\n\`/nota TEXTO\` — guardar nota\n\`/tarefa TEXTO\` — adicionar tarefa\n\`/lembrete TEXTO\` — guardar lembrete\n\`/briefing\` — resumo do dia\n\n_Podes também escrever em linguagem natural!_`);
+  const msg =
+    `📖 *Manual de Comandos Rápidos:*\n\n` +
+    `*📱 Mini Apps:*\n` +
+    `• \`/apps\` — Catálogo de todas as 9 aplicações\n` +
+    `• \`/menu\` — Cockpit interativo com botões\n` +
+    `• \`/apk\` — Download da app nativa RotaBus Android\n\n` +
+    `*🏡 Família & Pessoal:*\n` +
+    `• \`/compras\` — Ver ou gerir lista de compras\n` +
+    `• \`/tarefas\` — Tarefas domésticas pendentes\n` +
+    `• \`/carolina\` — Escola, faltas, consultas e atividades\n` +
+    `• \`/nota TEXTO\` — Guardar apontamento rápido\n` +
+    `• \`/briefing\` — Resumo geral do dia com IA\n\n` +
+    `*🚛 Frotas & RotaBus:*\n` +
+    `• \`/rota ORIGEM para DESTINO\` — Rota otimizada para pesados\n` +
+    `• \`/tacografo HORAS\` — Auditoria legal CE 561/2006\n\n` +
+    `*🏠 Imobiliário:*\n` +
+    `• \`/avaliacao ÁREA ZONA TIPOLOGIA ESTADO\` — Preço/m² e valor de mercado\n\n` +
+    `*🖥️ Dev & Cloud:*\n` +
+    `• \`/projetos\` — Repositórios recentes no GitHub\n` +
+    `• \`/criar_app NOME\` — Scaffold de novo projeto`;
+
+  await sendReply(ctx, msg, getMasterKeyboard());
+});
+
+// Ações de Callback dos Botões Inline no Master
+bot.action('act_compras', async (ctx) => {
+  await ctx.answerCbQuery();
+  const resp = await handleGeral('/compras');
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.webApp('🛒 Abrir na Mini App Família', VERCEL_APPS.familiar.url)],
+    [Markup.callback('🔄 Atualizar', 'act_compras'), Markup.callback('🧹 Limpar Concluídos', 'act_compras_limpar')]
+  ]));
+});
+
+bot.action('act_compras_limpar', async (ctx) => {
+  await ctx.answerCbQuery('Compras concluídas limpas!');
+  const resp = await handleGeral('/compras limpar');
+  await sendReply(ctx, resp);
+});
+
+bot.action('act_tarefas', async (ctx) => {
+  await ctx.answerCbQuery();
+  const resp = await handleGeral('/tarefas');
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.webApp('📋 Abrir na Mini App', VERCEL_APPS.familiar.url)],
+    [Markup.callback('🔄 Atualizar', 'act_tarefas')]
+  ]));
+});
+
+bot.action('act_carolina', async (ctx) => {
+  await ctx.answerCbQuery();
+  const resp = await handleGeral('/carolina');
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.webApp('👧 Abrir Carolina na Mini App', VERCEL_APPS.familiar.url)],
+    [Markup.callback('🔄 Atualizar', 'act_carolina')]
+  ]));
+});
+
+bot.action('act_briefing', async (ctx) => {
+  await ctx.answerCbQuery('A preparar o teu briefing...');
+  await ctx.sendChatAction('typing');
+  const resp = await handleGeral('/briefing');
+  await sendReply(ctx, resp);
+});
+
+bot.action('act_frotas', async (ctx) => {
+  await ctx.answerCbQuery();
+  const resp = await handleFrotas('');
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.webApp('🚌 Abrir RotaBus GPS', VERCEL_APPS.rotabus.url), Markup.url('📲 Descarregar APK', VERCEL_APPS.rotabus.apkUrl)],
+    [Markup.callback('🚛 Porto ➔ Lisboa', 'frota_porto_lisboa'), Markup.callback('🚛 Amarante ➔ Porto', 'frota_amarante_porto')],
+    [Markup.callback('⏱️ Tacógrafo: 4.5h', 'btn_tacho_45'), Markup.callback('⏱️ Tacógrafo: 9.0h', 'btn_tacho_90')]
+  ]));
+});
+
+bot.action('act_immo', async (ctx) => {
+  await ctx.answerCbQuery();
+  const resp = await handleImmo('');
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)],
+    [Markup.callback('📍 Amarante T3 (120m²)', 'immo_amarante'), Markup.callback('📍 Felgueiras T2 (85m²)', 'immo_felgueiras')]
+  ]));
+});
+
+bot.action('act_dev', async (ctx) => {
+  await ctx.answerCbQuery('A consultar GitHub...');
+  await ctx.sendChatAction('typing');
+  const resp = await handleDev('/projetos');
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.webApp('💻 Scaffold Bot Preview', VERCEL_APPS.scaffold.url)],
+    [Markup.callback('🌐 Ver Todas as Mini Apps', 'act_all_apps')]
+  ]));
+});
+
+bot.action('act_all_apps', async (ctx) => {
+  await ctx.answerCbQuery();
+  const md = formatAllVercelAppsMarkdown();
+  await sendReply(ctx, md, buildTelegramAppsKeyboard());
+});
+
+bot.action('frota_porto_lisboa', async (ctx) => {
+  await ctx.answerCbQuery('A calcular rota...');
+  await ctx.sendChatAction('typing');
+  const resp = await handleFrotas('/rota Porto para Lisboa');
+  await sendReply(ctx, resp);
+});
+
+bot.action('frota_amarante_porto', async (ctx) => {
+  await ctx.answerCbQuery('A calcular rota...');
+  await ctx.sendChatAction('typing');
+  const resp = await handleFrotas('/rota Amarante para Porto');
+  await sendReply(ctx, resp);
+});
+
+bot.action('btn_tacho_45', async (ctx) => {
+  await ctx.answerCbQuery();
+  const resp = await handleFrotas('/tacografo 4.5');
+  await sendReply(ctx, resp);
+});
+
+bot.action('btn_tacho_90', async (ctx) => {
+  await ctx.answerCbQuery();
+  const resp = await handleFrotas('/tacografo 9');
+  await sendReply(ctx, resp);
+});
+
+bot.action('immo_amarante', async (ctx) => {
+  await ctx.answerCbQuery('A avaliar...');
+  await ctx.sendChatAction('typing');
+  const resp = await handleImmo('/avaliacao 120 Amarante T3 bom');
+  await sendReply(ctx, resp);
+});
+
+bot.action('immo_felgueiras', async (ctx) => {
+  await ctx.answerCbQuery('A avaliar...');
+  await ctx.sendChatAction('typing');
+  const resp = await handleImmo('/avaliacao 85 Felgueiras T2 bom');
+  await sendReply(ctx, resp);
 });
 
 bot.on('text', async (ctx) => {
@@ -118,86 +391,255 @@ bot.on('text', async (ctx) => {
   }
 });
 
-bot.on('sticker', (ctx) => ctx.reply('😄 Sticker recebido! Fala comigo em texto.'));
-bot.on('photo', (ctx) => ctx.reply('📸 Foto recebida! Por agora só processo texto.'));
-bot.on('voice', (ctx) => ctx.reply('🎙️ Mensagem de voz recebida! Por agora só processo texto.'));
+bot.on('sticker', (ctx) => ctx.reply('😄 Sticker recebido! Fala comigo em texto ou toca no menu de Mini Apps.'));
+bot.on('photo', (ctx) => ctx.reply('📸 Imagem recebida com sucesso!'));
+bot.on('voice', (ctx) => ctx.reply('🎙️ Mensagem de voz recebida!'));
 
 bot.catch((err, ctx) => {
   log.error('Erro não tratado no Master Bot', err?.message || err);
-  ctx?.reply('⚠️ Ocorreu um erro inesperado no Master. O bot continua ativo.').catch(() => {});
+  ctx?.reply('⚠️ Ocorreu um erro no Master. O bot continua ativo.').catch(() => {});
 });
 
 botInstances.push({ name: 'Master (@AndrePinheirobot)', bot });
 
-// 2. WORKER DEV (@DesSofBot)
+// 2. WORKER DEV (@DesSofBot) ──────────────────────────────────────────────────
 const DEV_TOKEN = process.env.TELEGRAM_DEV_TOKEN || process.env.TELEGRAM_BOT_TOKEN_DEV || process.env.DEV_TOKEN;
 if (DEV_TOKEN && DEV_TOKEN.trim()) {
   const botDev = new Telegraf(DEV_TOKEN.trim());
   botDev.use(authMiddleware);
+
+  botDev.telegram.setChatMenuButton({
+    menu_button: {
+      type: 'web_app',
+      text: '💻 Scaffold App',
+      web_app: { url: VERCEL_APPS.scaffold.url }
+    }
+  }).catch(() => {});
+
   botDev.start(async (ctx) => {
-    await sendReply(ctx, `💻 *Worker Dev & Cloud Ativo na Nuvem!*\n\nEspecialista em Engenharia de Software, GitHub e Vercel.\n\n• \`/projetos\` — Listar repositórios\n• \`/criar_app NOME : DESCRIÇÃO\` — Scaffold e deploy\n• Envia qualquer pergunta de código ou arquitetura!`);
+    await sendReply(ctx, `💻 *Worker Dev & Cloud Ativo na Nuvem!*\n\nEspecialista em Engenharia de Software, GitHub, Vercel e Render.\n\n• \`/projetos\` — Listar repositórios GitHub\n• \`/apps\` — Ver as tuas 9 Mini Apps\n• \`/apks\` — Descarregar APKs compilados\n• \`/criar_app NOME\` — Scaffold automático`, Markup.inlineKeyboard([
+      [Markup.button.webApp('💻 Abrir Scaffold Bot', VERCEL_APPS.scaffold.url)],
+      [Markup.button.callback('📂 Repositórios GitHub', 'dev_repos'), Markup.button.callback('📲 APKs Disponíveis', 'dev_apks')]
+    ]));
   });
-  botDev.command('projetos', async (ctx) => {
+
+  botDev.command(['projetos', 'repos'], async (ctx) => {
     await ctx.sendChatAction('typing');
     const resp = await handleDev('/projetos');
     await sendReply(ctx, resp);
   });
+
+  botDev.command(['apps', 'catalogo'], async (ctx) => {
+    await sendReply(ctx, formatAllVercelAppsMarkdown(), buildTelegramAppsKeyboard());
+  });
+
+  botDev.command(['apks', 'apk'], async (ctx) => {
+    const resp = await handleDev('/apks');
+    await sendReply(ctx, resp, Markup.inlineKeyboard([
+      [Markup.button.url('📲 Descarregar RotaBus APK', VERCEL_APPS.rotabus.apkUrl)]
+    ]));
+  });
+
+  botDev.action('dev_repos', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.sendChatAction('typing');
+    const resp = await handleDev('/projetos');
+    await sendReply(ctx, resp);
+  });
+
+  botDev.action('dev_apks', async (ctx) => {
+    await ctx.answerCbQuery();
+    const resp = await handleDev('/apks');
+    await sendReply(ctx, resp);
+  });
+
   botDev.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
     const resp = await handleDev(ctx.message.text);
     await sendReply(ctx, resp);
   });
+
   botDev.catch((err) => log.error('Erro no Worker Dev', err?.message || err));
   botInstances.push({ name: 'Dev (@DesSofBot)', bot: botDev });
 }
 
-// 3. WORKER FROTAS (@TrasFrotBot)
+// 3. WORKER FROTAS (@TrasFrotBot) ─────────────────────────────────────────────
 const FROTAS_TOKEN = process.env.TELEGRAM_FROTAS_TOKEN || process.env.TELEGRAM_BOT_TOKEN_FROTAS || process.env.FROTAS_TOKEN;
 if (FROTAS_TOKEN && FROTAS_TOKEN.trim()) {
   const botFrotas = new Telegraf(FROTAS_TOKEN.trim());
   botFrotas.use(authMiddleware);
+
+  botFrotas.telegram.setChatMenuButton({
+    menu_button: {
+      type: 'web_app',
+      text: '🚌 RotaBus GPS',
+      web_app: { url: VERCEL_APPS.rotabus.url }
+    }
+  }).catch(() => {});
+
   botFrotas.start(async (ctx) => {
-    await sendReply(ctx, `🚛 *Worker Frotas & Tacógrafo Ativo na Nuvem!*\n\nEspecialista em Logística, Tacógrafo e Rotas de Pesados.\n\n• \`/rota ORIGEM para DESTINO\`\n• \`/tacografo HORAS\`\n• Perguntas sobre tempos de condução e repouso (Regulamento 561/2006).`);
+    await sendReply(ctx, `🚛 *Worker Frotas, Tacógrafo & RotaBus VIP!*\n\nEspecialista em Logística, Tacógrafo Digital e Navegação sem Enjoo para Equipas.\n\n• \`/rota ORIGEM para DESTINO\`\n• \`/tacografo HORAS\`\n• \`/apk\` — Descarregar nova versão Android`, Markup.inlineKeyboard([
+      [Markup.button.webApp('🚌 Abrir RotaBus GPS VIP', VERCEL_APPS.rotabus.url)],
+      [Markup.button.url('📲 Descarregar APK Android', VERCEL_APPS.rotabus.apkUrl)],
+      [Markup.button.callback('🚛 Porto ➔ Lisboa', 'frota_porto_lisboa'), Markup.button.callback('🚛 Amarante ➔ Porto', 'frota_amarante_porto')],
+      [Markup.button.callback('⏱️ Tacógrafo: 4.5h', 'btn_tacho_45'), Markup.button.callback('⏱️ Tacógrafo: 9.0h', 'btn_tacho_90')]
+    ]));
   });
+
+  botFrotas.command('rota', async (ctx) => {
+    await ctx.sendChatAction('typing');
+    const resp = await handleFrotas(ctx.message.text);
+    await sendReply(ctx, resp, Markup.inlineKeyboard([
+      [Markup.button.webApp('🚌 Ver Rota no RotaBus', VERCEL_APPS.rotabus.url)]
+    ]));
+  });
+
+  botFrotas.command('tacografo', async (ctx) => {
+    const resp = await handleFrotas(ctx.message.text);
+    await sendReply(ctx, resp);
+  });
+
+  botFrotas.command(['apk', 'download'], async (ctx) => {
+    await sendReply(ctx, `📲 *Download RotaBus para Android (APK Oficial)*\n\nVersão com suporte a Android Auto, anti-sinuosidade e tacógrafo:\n[https://smooth-bus-routes.vercel.app/rotabus.apk](https://smooth-bus-routes.vercel.app/rotabus.apk)`, Markup.inlineKeyboard([
+      [Markup.button.url('📥 Descarregar APK Agora', VERCEL_APPS.rotabus.apkUrl)],
+      [Markup.button.webApp('🌐 Versão Web PWA', VERCEL_APPS.rotabus.url)]
+    ]));
+  });
+
+  botFrotas.action('frota_porto_lisboa', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.sendChatAction('typing');
+    const resp = await handleFrotas('/rota Porto para Lisboa');
+    await sendReply(ctx, resp);
+  });
+
+  botFrotas.action('frota_amarante_porto', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.sendChatAction('typing');
+    const resp = await handleFrotas('/rota Amarante para Porto');
+    await sendReply(ctx, resp);
+  });
+
+  botFrotas.action('btn_tacho_45', async (ctx) => {
+    await ctx.answerCbQuery();
+    const resp = await handleFrotas('/tacografo 4.5');
+    await sendReply(ctx, resp);
+  });
+
+  botFrotas.action('btn_tacho_90', async (ctx) => {
+    await ctx.answerCbQuery();
+    const resp = await handleFrotas('/tacografo 9');
+    await sendReply(ctx, resp);
+  });
+
   botFrotas.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
     const resp = await handleFrotas(ctx.message.text);
     await sendReply(ctx, resp);
   });
+
   botFrotas.catch((err) => log.error('Erro no Worker Frotas', err?.message || err));
   botInstances.push({ name: 'Frotas (@TrasFrotBot)', bot: botFrotas });
 }
 
-// 4. WORKER IMMO (@ppspppBot)
+// 4. WORKER IMMO (@ppspppBot) ─────────────────────────────────────────────────
 const IMMO_TOKEN = process.env.TELEGRAM_IMMO_TOKEN || process.env.TELEGRAM_BOT_TOKEN_IMMO || process.env.IMMO_TOKEN;
 if (IMMO_TOKEN && IMMO_TOKEN.trim()) {
   const botImmo = new Telegraf(IMMO_TOKEN.trim());
   botImmo.use(authMiddleware);
+
+  botImmo.telegram.setChatMenuButton({
+    menu_button: {
+      type: 'web_app',
+      text: '🏠 ImmoEval',
+      web_app: { url: VERCEL_APPS.immo.url }
+    }
+  }).catch(() => {});
+
   botImmo.start(async (ctx) => {
-    await sendReply(ctx, `🏠 *Worker Imobiliário CMVM Ativo na Nuvem!*\n\nAvaliação imobiliária por m² para Amarante e Região Norte.\n\n• \`/avaliacao ÁREA ZONA TIPOLOGIA ESTADO\`\nEx: \`/avaliacao 120 Amarante T3 bom\`\n• Pergunta por métricas de viabilidade de construção e terrenos.`);
+    await sendReply(ctx, `🏠 *Worker Imobiliário CMVM Ativo na Nuvem!*\n\nAvaliação imobiliária por m² para Amarante e Região Norte.\n\n• \`/avaliacao ÁREA ZONA TIPOLOGIA ESTADO\`\nEx: \`/avaliacao 120 Amarante T3 bom\``, Markup.inlineKeyboard([
+      [Markup.button.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)],
+      [Markup.button.callback('📍 Amarante T3 (120m²)', 'immo_amarante'), Markup.button.callback('📍 Felgueiras T2 (85m²)', 'immo_felgueiras')]
+    ]));
   });
+
+  botImmo.action('immo_amarante', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.sendChatAction('typing');
+    const resp = await handleImmo('/avaliacao 120 Amarante T3 bom');
+    await sendReply(ctx, resp);
+  });
+
+  botImmo.action('immo_felgueiras', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.sendChatAction('typing');
+    const resp = await handleImmo('/avaliacao 85 Felgueiras T2 bom');
+    await sendReply(ctx, resp);
+  });
+
   botImmo.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
     const resp = await handleImmo(ctx.message.text);
     await sendReply(ctx, resp);
   });
+
   botImmo.catch((err) => log.error('Erro no Worker Immo', err?.message || err));
   botInstances.push({ name: 'Immo (@ppspppBot)', bot: botImmo });
 }
 
-// 5. WORKER PESSOAL (@AndTrarBOT)
+// 5. WORKER PESSOAL (@AndTrarBOT) ─────────────────────────────────────────────
 const PESSOAL_TOKEN = process.env.TELEGRAM_PESSOAL_TOKEN || process.env.TELEGRAM_BOT_TOKEN_PESSOAL || process.env.PESSOAL_TOKEN;
 if (PESSOAL_TOKEN && PESSOAL_TOKEN.trim()) {
   const botPessoal = new Telegraf(PESSOAL_TOKEN.trim());
   botPessoal.use(authMiddleware);
+
+  botPessoal.telegram.setChatMenuButton({
+    menu_button: {
+      type: 'web_app',
+      text: '🏡 Família',
+      web_app: { url: VERCEL_APPS.familiar.url }
+    }
+  }).catch(() => {});
+
   botPessoal.start(async (ctx) => {
-    await sendReply(ctx, `📋 *Assistente Pessoal & Produtividade Ativo na Nuvem!*\n\n• \`/compras\` — Gerir lista de compras\n• \`/tarefa TEXTO\` — Adicionar tarefa\n• \`/nota TEXTO\` — Guardar nota rápida\n• \`/briefing\` — Resumo diário de compromissos`);
+    await sendReply(ctx, `📋 *Assistente Familiar & Produtividade!*\n\nSincronizado diretamente com a tua Mini App no Telegram.\n\n• \`/compras\` — Ver ou gerir compras\n• \`/tarefas\` — Tarefas domésticas e pessoais\n• \`/carolina\` — Escola, faltas e consultas\n• \`/briefing\` — Resumo diário de compromissos`, Markup.inlineKeyboard([
+      [Markup.button.webApp('🏡 Abrir Mini App Família', VERCEL_APPS.familiar.url)],
+      [Markup.button.callback('🛒 Lista de Compras', 'pessoal_compras'), Markup.button.callback('📋 Tarefas da Casa', 'pessoal_tarefas')],
+      [Markup.button.callback('👧 Carolina (Escola/Saúde)', 'pessoal_carolina'), Markup.button.callback('☀️ Briefing do Dia', 'pessoal_briefing')]
+    ]));
   });
+
+  botPessoal.action('pessoal_compras', async (ctx) => {
+    await ctx.answerCbQuery();
+    const resp = await handleGeral('/compras');
+    await sendReply(ctx, resp);
+  });
+
+  botPessoal.action('pessoal_tarefas', async (ctx) => {
+    await ctx.answerCbQuery();
+    const resp = await handleGeral('/tarefas');
+    await sendReply(ctx, resp);
+  });
+
+  botPessoal.action('pessoal_carolina', async (ctx) => {
+    await ctx.answerCbQuery();
+    const resp = await handleGeral('/carolina');
+    await sendReply(ctx, resp);
+  });
+
+  botPessoal.action('pessoal_briefing', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.sendChatAction('typing');
+    const resp = await handleGeral('/briefing');
+    await sendReply(ctx, resp);
+  });
+
   botPessoal.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
     const resp = await handleGeral(ctx.message.text);
     await sendReply(ctx, resp);
   });
+
   botPessoal.catch((err) => log.error('Erro no Worker Pessoal', err?.message || err));
   botInstances.push({ name: 'Pessoal (@AndTrarBOT)', bot: botPessoal });
 }
@@ -226,25 +668,44 @@ process.on('unhandledRejection', (reason) => {
   log.error('unhandledRejection', String(reason));
 });
 
-// ─── Servidor HTTP para Render.com (mantém o serviço "acordado") ────────────
+// ─── Servidor HTTP & API REST para Render e Mini Apps ───────────────────────
 const PORT = process.env.PORT || 3000;
 const server = http.createServer((req, res) => {
-  if (req.url === '/health' || req.url === '/') {
+  const urlPath = (req.url || '/').split('?')[0];
+
+  // 1. Health check do Render
+  if (urlPath === '/health' || urlPath === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       status: 'ok',
       service: 'telegram-master-bot',
       activeBots: botInstances.map((b) => b.name),
+      miniApps: Object.keys(VERCEL_APPS).length,
       uptime: process.uptime()
     }));
-  } else {
-    res.writeHead(404);
-    res.end('Not found');
+    return;
   }
+
+  // 2. Catálogo de Mini Apps API
+  if (urlPath === '/api/apps') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(VERCEL_APPS));
+    return;
+  }
+
+  // 3. API REST da Mini App Família (/api/family/*)
+  if (urlPath.startsWith('/api/family')) {
+    const handled = handleFamilyApi(req, res, urlPath, req.method);
+    if (handled) return;
+  }
+
+  res.writeHead(404, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'Endpoint não encontrado' }));
 });
 
 server.listen(PORT, () => {
-  log.info(`Servidor HTTP ativo na porta ${PORT} (health check para Render.com)`);
+  log.info(`Servidor HTTP e API REST ativo na porta ${PORT} para Render.com e Mini Apps`);
 });
 
 // ─── Arranque Paralelo de Todos os Bots Ativos ─────────────────────────────
@@ -268,11 +729,10 @@ async function launchSingleBot(name, b, retries = 5, delayMs = 5000) {
 }
 
 function startAllBots() {
-  log.info(`A arrancar ${botInstances.length} bots em paralelo...`);
+  log.info(`A arrancar ${botInstances.length} bots em paralelo com suporte completo a Mini Apps...`);
   for (const { name, bot: b } of botInstances) {
     launchSingleBot(name, b);
   }
 }
 
 startAllBots();
-
