@@ -18,3 +18,4 @@ console.log('Menu gerado com sucesso. Tamanho:', menu.text.length);
 
 const formatted = formatSearchResults('panda', res2);
 console.log('Formatado para Telegram:\n', formatted.text);
+

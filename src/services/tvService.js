@@ -42,8 +42,8 @@ export function getChannels() {
   }
 
   const paths = [
-    'c:/Users/Surface_Dpc/Desktop/PORTUGAL_COMPLETO.m3u',
     path.resolve('./public/portugal.m3u'),
+    'c:/Users/Surface_Dpc/Desktop/PORTUGAL_COMPLETO.m3u',
     path.resolve('./data/portugal.m3u')
   ];
 
@@ -232,3 +232,4 @@ export function getVlcHelpMarkdown() {
     `5. Prima **Reproduzir**. O VLC guarda a lista no histórico para mudar de canal num instante com as setas do comando!`
   );
 }
+

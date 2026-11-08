@@ -55,3 +55,7 @@ services:
         sync: false
       - key: EMAIL_PASSWORD
         sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_KEY
+        sync: false
+      - key: GOOGLE_DRIVE_FOLDER_ID
+        sync: false

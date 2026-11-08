@@ -21,6 +21,10 @@ import {
   getXtreamCredentialsMarkdown, 
   getVlcHelpMarkdown 
 } from './src/services/tvService.js';
+import { 
+  isDriveConfigured, 
+  backupDatabaseToDrive 
+} from './src/services/googleDriveService.js';
 import { existsSync, readFileSync, mkdirSync } from 'fs';
 import path from 'path';
 
@@ -87,6 +91,9 @@ function getMasterKeyboard() {
     ],
     [
       Markup.button.callback('📺 TV & Canais IPTV', 'act_tv_menu'),
+      Markup.button.callback('☁️ Drive & Nuvem', 'act_drive_status')
+    ],
+    [
       Markup.button.callback('🌐 Todas as 9 Mini Apps', 'act_all_apps')
     ]
   ]);
@@ -236,6 +243,36 @@ bot.command(['canal', 'canais'], async (ctx) => {
   const results = searchChannels(text);
   const formatted = formatSearchResults(text || 'Populares', results);
   await sendReply(ctx, formatted.text, formatted.keyboard);
+});
+
+bot.command(['drive', 'gdrive', 'backup_drive'], async (ctx) => {
+  const configured = isDriveConfigured();
+  if (!configured) {
+    const msg = 
+      `☁️ *Google Drive — Armazenamento na Nuvem*\n\n` +
+      `O módulo do Google Drive está pronto no código, mas ainda não tem a chave de ligação.\n\n` +
+      `*Como ativar o envio direto para o Google Drive:*\n` +
+      `1. Coloque o ficheiro da Google \`service-account.json\` na pasta do projeto ou adicione no \`.env\`:\n` +
+      `   \`GOOGLE_SERVICE_ACCOUNT_KEY={...}\`\n` +
+      `2. Partilhe a pasta do seu Google Drive com o email da conta de serviço.\n\n` +
+      `_Tudo o que guardar no Telegram (compras, notas, tarefas e listas M3U) será copiado em segurança para a nuvem!_`;
+    return await sendReply(ctx, msg, Markup.inlineKeyboard([
+      [Markup.button.callback('🔄 Testar Ligação', 'act_drive_status')]
+    ]));
+  }
+
+  await ctx.sendChatAction('upload_document');
+  await sendReply(ctx, '⏳ *A sincronizar base de dados e listas para o Google Drive...*');
+  const res = await backupDatabaseToDrive();
+  if (res.success) {
+    let okMsg = `✅ *Backup no Google Drive concluído com sucesso!*\n\n📅 *Data:* \`${res.timestamp}\`\n\n*Ficheiros guardados na nuvem:*\n`;
+    res.files.forEach(f => {
+      okMsg += `• [${f.name}](${f.link || '#'})\n`;
+    });
+    await sendReply(ctx, okMsg);
+  } else {
+    await sendReply(ctx, `⚠️ Erro no backup para o Google Drive: ${res.error || res.message}`);
+  }
 });
 
 bot.command(['apps', 'app', 'catalogo', 'vercel'], async (ctx) => {
@@ -477,9 +514,9 @@ bot.action('act_tv_help', async (ctx) => {
 
 bot.action('act_tv_download_pt', async (ctx) => {
   await ctx.answerCbQuery('A enviar lista M3U...');
-  const m3uPath = existsSync('c:/Users/Surface_Dpc/Desktop/PORTUGAL_COMPLETO.m3u')
-    ? 'c:/Users/Surface_Dpc/Desktop/PORTUGAL_COMPLETO.m3u'
-    : path.resolve('./public/portugal.m3u');
+  const m3uPath = existsSync(path.resolve('./public/portugal.m3u'))
+    ? path.resolve('./public/portugal.m3u')
+    : 'c:/Users/Surface_Dpc/Desktop/PORTUGAL_COMPLETO.m3u';
 
   if (existsSync(m3uPath)) {
     await ctx.replyWithDocument(
@@ -488,6 +525,35 @@ bot.action('act_tv_download_pt', async (ctx) => {
     );
   } else {
     await ctx.reply('⚠️ O ficheiro M3U local não foi encontrado.');
+  }
+});
+
+bot.action('act_drive_status', async (ctx) => {
+  await ctx.answerCbQuery();
+  const configured = isDriveConfigured();
+  if (!configured) {
+    await sendReply(ctx, 
+      `☁️ *Estado do Google Drive:* ⚪ _A aguardar credenciais no .env_\n\n` +
+      `Assim que configurar a chave \`GOOGLE_SERVICE_ACCOUNT_KEY\`, o bot enviará cópias automáticas de segurança de todos os seus dados e listas para a nuvem.\n\n` +
+      `_Digite /drive para ver o guia de configuração._`,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('🎛️ Voltar ao Cockpit', 'act_main_menu')]
+      ])
+    );
+  } else {
+    await ctx.sendChatAction('typing');
+    const res = await backupDatabaseToDrive();
+    if (res.success) {
+      await sendReply(ctx, 
+        `☁️ *Estado do Google Drive:* 🟢 _Operacional!_\n\n` +
+        `Backup efetuado com sucesso na pasta *TelegramBot_Backups* do Drive.`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🎛️ Voltar ao Cockpit', 'act_main_menu')]
+        ])
+      );
+    } else {
+      await sendReply(ctx, `⚠️ Erro ao contactar o Google Drive: ${res.error || res.message}`);
+    }
   }
 });
 
@@ -869,9 +935,9 @@ const server = http.createServer((req, res) => {
 
   // 4. Listas M3U (IPTV / MatchPro / Portugal)
   if (urlPath === '/portugal.m3u' || urlPath === '/api/portugal.m3u') {
-    const ptM3u = existsSync('c:/Users/Surface_Dpc/Desktop/PORTUGAL_COMPLETO.m3u')
-      ? 'c:/Users/Surface_Dpc/Desktop/PORTUGAL_COMPLETO.m3u'
-      : path.resolve('./public/portugal.m3u');
+    const ptM3u = existsSync(path.resolve('./public/portugal.m3u'))
+      ? path.resolve('./public/portugal.m3u')
+      : 'c:/Users/Surface_Dpc/Desktop/PORTUGAL_COMPLETO.m3u';
     if (existsSync(ptM3u)) {
       res.writeHead(200, {
         'Content-Type': 'audio/x-mpegurl; charset=utf-8',
