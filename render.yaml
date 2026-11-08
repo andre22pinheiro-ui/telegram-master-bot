@@ -17,6 +17,14 @@ services:
         value: info
       - key: TELEGRAM_BOT_TOKEN_MASTER
         sync: false
+      - key: TELEGRAM_DEV_TOKEN
+        sync: false
+      - key: TELEGRAM_FROTAS_TOKEN
+        sync: false
+      - key: TELEGRAM_IMMO_TOKEN
+        sync: false
+      - key: TELEGRAM_PESSOAL_TOKEN
+        sync: false
       - key: CHAT_ID_AUTORIZADO
         sync: false
       - key: GEMINI_API_KEY
