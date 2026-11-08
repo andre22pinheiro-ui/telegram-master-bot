@@ -10,7 +10,10 @@ import { handle as handleGeral } from './src/workers/worker_geral.js';
 import { createLogger } from './src/utils/logger.js';
 import { VERCEL_APPS, buildTelegramAppsKeyboard, formatAllVercelAppsMarkdown } from './src/shared/appsCatalog.js';
 import { handleFamilyApi } from './src/shared/familyRoutes.js';
-import { mkdirSync } from 'fs';
+import { analyzeImageBuffer, downloadTelegramPhoto } from './src/shared/multimodalVision.js';
+import { uploadToCloudinary } from './src/shared/cloudinaryCdn.js';
+import { existsSync, readFileSync, mkdirSync } from 'fs';
+import path from 'path';
 
 const log = createLogger('Master');
 
@@ -99,6 +102,48 @@ async function sendReply(ctx, text, extra = null) {
   for (let i = 0; i < chunks.length; i++) {
     const isLast = i === chunks.length - 1;
     await ctx.replyWithMarkdown(chunks[i], isLast && extra ? extra : undefined);
+  }
+}
+
+// ─── Processamento Inteligente de Imagens (Visão Gemini & CDN Cloudinary) ───
+
+async function processPhotoWithVision(ctx, botToken, contextTag = 'geral') {
+  const photos = ctx.message?.photo;
+  if (!photos || photos.length === 0) return;
+
+  await ctx.sendChatAction('typing');
+  const caption = (ctx.message.caption || '').trim();
+  const largest = photos[photos.length - 1];
+
+  try {
+    const downloaded = await downloadTelegramPhoto(ctx.telegram, largest.file_id, botToken);
+    if (!downloaded || !downloaded.buffer) {
+      return ctx.reply('❌ Não foi possível descarregar a imagem para análise.');
+    }
+
+    let cdnUrl = '';
+    try {
+      const up = await uploadToCloudinary(downloaded.buffer, `${contextTag}_${Date.now()}`);
+      if (up && up.url) cdnUrl = up.url;
+    } catch {}
+
+    const defaultPrompt = caption ||
+      'Analisa detalhadamente esta imagem em português de Portugal. ' +
+      'Se for comida ou refeição: identifica ingredientes, calorias (Kcal) e gramas de proteína/hidratos/gordura. ' +
+      'Se for erro, código ou app: aponta a linha, causa e solução técnica em detalhe. ' +
+      'Se for documento, recibo ou obra: resume valores, datas, medidas e conclusões práticas.';
+
+    const analysis = await analyzeImageBuffer(downloaded.buffer, 'image/jpeg', defaultPrompt);
+
+    let reply = `🔍 *Análise de Imagem (IA Multimodal):*\n\n${analysis}`;
+    if (cdnUrl) {
+      reply += `\n\n☁️ [Ver no Cloudinary CDN](${cdnUrl})`;
+    }
+
+    await sendReply(ctx, reply);
+  } catch (err) {
+    log.error(`Erro ao processar imagem [${contextTag}]`, err?.message || err);
+    await ctx.reply(`⚠️ Ocorreu um erro na análise da imagem: ${err?.message || err}`);
   }
 }
 
@@ -392,7 +437,7 @@ bot.on('text', async (ctx) => {
 });
 
 bot.on('sticker', (ctx) => ctx.reply('😄 Sticker recebido! Fala comigo em texto ou toca no menu de Mini Apps.'));
-bot.on('photo', (ctx) => ctx.reply('📸 Imagem recebida com sucesso!'));
+bot.on('photo', (ctx) => processPhotoWithVision(ctx, TOKEN, 'master'));
 bot.on('voice', (ctx) => ctx.reply('🎙️ Mensagem de voz recebida!'));
 
 bot.catch((err, ctx) => {
@@ -452,6 +497,8 @@ if (DEV_TOKEN && DEV_TOKEN.trim()) {
     const resp = await handleDev('/apks');
     await sendReply(ctx, resp);
   });
+
+  botDev.on('photo', (ctx) => processPhotoWithVision(ctx, DEV_TOKEN, 'dev'));
 
   botDev.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
@@ -532,6 +579,8 @@ if (FROTAS_TOKEN && FROTAS_TOKEN.trim()) {
     await sendReply(ctx, resp);
   });
 
+  botFrotas.on('photo', (ctx) => processPhotoWithVision(ctx, FROTAS_TOKEN, 'frotas'));
+
   botFrotas.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
     const resp = await handleFrotas(ctx.message.text);
@@ -576,6 +625,8 @@ if (IMMO_TOKEN && IMMO_TOKEN.trim()) {
     const resp = await handleImmo('/avaliacao 85 Felgueiras T2 bom');
     await sendReply(ctx, resp);
   });
+
+  botImmo.on('photo', (ctx) => processPhotoWithVision(ctx, IMMO_TOKEN, 'immo'));
 
   botImmo.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
@@ -634,6 +685,23 @@ if (PESSOAL_TOKEN && PESSOAL_TOKEN.trim()) {
     await sendReply(ctx, resp);
   });
 
+  botPessoal.on('photo', (ctx) => processPhotoWithVision(ctx, PESSOAL_TOKEN, 'pessoal'));
+
+  botPessoal.command(['nutricao', 'dieta'], async (ctx) => {
+    const resp = await handleGeral('/nutricao');
+    await sendReply(ctx, resp);
+  });
+
+  botPessoal.command('ergonomia', async (ctx) => {
+    const resp = await handleGeral('/ergonomia');
+    await sendReply(ctx, resp);
+  });
+
+  botPessoal.command('proteina', async (ctx) => {
+    const resp = await handleGeral(ctx.message.text);
+    await sendReply(ctx, resp);
+  });
+
   botPessoal.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
     const resp = await handleGeral(ctx.message.text);
@@ -673,7 +741,26 @@ const PORT = process.env.PORT || 3000;
 const server = http.createServer((req, res) => {
   const urlPath = (req.url || '/').split('?')[0];
 
-  // 1. Health check do Render
+  // 1. Mini App Frontend (HTML/Estáticos da WebApp)
+  if (urlPath === '/webapp' || urlPath === '/mini-app' || urlPath === '/app') {
+    const indexPath = path.resolve('./public/index.html');
+    if (existsSync(indexPath)) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(readFileSync(indexPath));
+      return;
+    }
+  }
+
+  if (urlPath === '/' && req.headers.accept?.includes('text/html')) {
+    const indexPath = path.resolve('./public/index.html');
+    if (existsSync(indexPath)) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(readFileSync(indexPath));
+      return;
+    }
+  }
+
+  // 2. Health check do Render
   if (urlPath === '/health' || urlPath === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({

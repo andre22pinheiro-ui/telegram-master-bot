@@ -34,8 +34,8 @@ const INTENT_PATTERNS = [
   {
     intent: 'GERAL',
     patterns: [
-      /^\/(compras?|notas?|briefing|tarefa|lembrete|lista|agenda|memo)\b/i,
-      /\b(comprar|compras|lista|supermercado|nota|notas|briefing|tarefa|tarefas|lembrete|lembretes|agenda|memo|recados?|personal|assistente)\b/i,
+      /^\/(compras?|notas?|briefing|tarefa|lembrete|lista|agenda|memo|carolina|nutricao|dieta|proteina|ergonomia)\b/i,
+      /\b(comprar|compras|lista|supermercado|nota|notas|briefing|tarefa|tarefas|lembrete|lembretes|agenda|memo|recados?|carolina|escola|falta|consulta|pediatra|nutri[cç][aã]o|prote[ií]na|dieta|macros|ergonomia|postura|sa[uú]de)\b/i,
     ],
   },
 ];

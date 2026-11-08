@@ -1,0 +1,58 @@
+{
+  "shopping": [
+    {
+      "id": "1",
+      "item_text": "Leite meio gordo",
+      "category": "mercearia",
+      "completed": false,
+      "created_by_name": "André",
+      "created_at": "2026-11-08T15:36:14.287Z"
+    },
+    {
+      "id": "2",
+      "item_text": "Pão fresco",
+      "category": "padaria",
+      "completed": false,
+      "created_by_name": "André",
+      "created_at": "2026-11-08T15:36:14.287Z"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Revisão periódica do autocarro RotaBus",
+      "assigned_to": "André",
+      "completed": false,
+      "created_by_name": "André",
+      "created_at": "2026-11-08T15:36:14.287Z"
+    },
+    {
+      "id": "2",
+      "title": "Preparar mochila da Carolina",
+      "assigned_to": "Ambos",
+      "completed": false,
+      "created_by_name": "André",
+      "created_at": "2026-11-08T15:36:14.287Z"
+    }
+  ],
+  "baby_logs": [
+    {
+      "id": "1",
+      "event_type": "actividades",
+      "details": "Pintura e desenho na escola",
+      "notes": "Muito bem disposta",
+      "created_by_name": "André",
+      "logged_time": "2026-11-08T15:36:14.287Z"
+    }
+  ],
+  "notes": [
+    {
+      "id": "1",
+      "title": "Ideia RotaBus",
+      "content": "Manter sempre prioridade a autoestradas e conforto VIP",
+      "color_tag": "emerald",
+      "created_by_name": "André",
+      "created_at": "2026-11-08T15:36:14.287Z"
+    }
+  ]
+}

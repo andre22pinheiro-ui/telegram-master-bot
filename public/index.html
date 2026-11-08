@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Família</title>
+  
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    input, textarea {
+      user-select: text;
+    }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900 dark:bg-slate-900 dark:text-gray-100 min-h-screen flex flex-col font-sans transition-colors duration-200">
+
+  <!-- HEADER COMPACTO: FAMÍLIA -->
+  <header class="sticky top-0 z-30 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-gray-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center space-x-2">
+      <div class="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-lg shadow-sm">
+        🏡
+      </div>
+      <div>
+        <h1 class="text-sm font-bold tracking-tight">Família</h1>
+        <p class="text-[11px] text-gray-500 dark:text-gray-400" id="user-greeting">Olá, Família 👋</p>
+      </div>
+    </div>
+    <div class="flex items-center space-x-1">
+      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">
+        ● Sincronizado
+      </span>
+    </div>
+  </header>
+
+  <!-- ABAS SUPERIORES COM A ABA "CAROLINA" -->
+  <nav class="sticky top-[57px] z-20 bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800 px-2 py-1.5 flex justify-around text-xs font-medium">
+    <button onclick="switchTab('carolina')" id="tab-carolina" class="tab-btn flex-1 py-1.5 text-center rounded-lg text-pink-600 font-bold bg-pink-50 dark:bg-slate-800 dark:text-pink-400">
+      👧 Carolina
+    </button>
+    <button onclick="switchTab('shopping')" id="tab-shopping" class="tab-btn flex-1 py-1.5 text-center rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-900">
+      🛒 Compras
+    </button>
+    <button onclick="switchTab('tasks')" id="tab-tasks" class="tab-btn flex-1 py-1.5 text-center rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-900">
+      📋 Tarefas
+    </button>
+    <button onclick="switchTab('notes')" id="tab-notes" class="tab-btn flex-1 py-1.5 text-center rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-900">
+      📝 Notas
+    </button>
+  </nav>
+
+  <!-- CONTEÚDO PRINCIPAL -->
+  <main class="flex-1 p-4 pb-20 max-w-lg mx-auto w-full">
+
+    <!-- SEÇÃO: CAROLINA (ESCOLA FALTAS, ACTIVIDADES, CONSULTAS) -->
+    <section id="sec-carolina" class="space-y-4">
+      
+      <!-- BOTÕES DE 1 TOQUE: ESCOLA FALTAS, ACTIVIDADES, CONSULTAS -->
+      <div class="grid grid-cols-3 gap-2">
+        <button onclick="quickCarolinaLog('faltas', 'Falta / Atraso na Escola')" class="bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800/50 p-2.5 rounded-xl text-center transition-all">
+          <span class="text-xl">🏫</span>
+          <p class="text-[11px] font-bold text-amber-900 dark:text-amber-200 mt-1">Escola Faltas</p>
+        </button>
+        <button onclick="quickCarolinaLog('actividades', 'Atividade Escolar / Parque')" class="bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800/50 p-2.5 rounded-xl text-center transition-all">
+          <span class="text-xl">🎨</span>
+          <p class="text-[11px] font-bold text-emerald-900 dark:text-emerald-200 mt-1">Actividades</p>
+        </button>
+        <button onclick="quickCarolinaLog('consultas', 'Consulta Médica / Pediatra')" class="bg-pink-50 hover:bg-pink-100 dark:bg-pink-950/40 dark:hover:bg-pink-900/60 border border-pink-200 dark:border-pink-800/50 p-2.5 rounded-xl text-center transition-all">
+          <span class="text-xl">🩺</span>
+          <p class="text-[11px] font-bold text-pink-900 dark:text-pink-200 mt-1">Consultas</p>
+        </button>
+      </div>
+
+      <!-- FORMULÁRIO DE REGISTO PERSONALIZADO -->
+      <div class="bg-white dark:bg-slate-800 p-3.5 rounded-xl shadow-xs border border-gray-200/80 dark:border-slate-700">
+        <form onsubmit="handleCustomCarolinaLog(event)" class="space-y-2.5">
+          <div class="flex gap-2">
+            <select id="select-carolina-type" class="bg-gray-100 dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-xs rounded-lg px-2.5 py-2 font-medium">
+              <option value="faltas">🏫 Escola Faltas</option>
+              <option value="actividades">🎨 Actividades</option>
+              <option value="consultas">🩺 Consultas</option>
+            </select>
+            <input type="text" id="input-carolina-details" placeholder="Detalhes (ex: Falta justificada, Visita de estudo, Pediatra às 15h)..." required
+              class="flex-1 bg-gray-100 dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-xs rounded-lg px-3 py-2 focus:ring-2 focus:ring-pink-500 focus:outline-hidden">
+          </div>
+          <button type="submit" class="w-full bg-pink-600 hover:bg-pink-700 text-white py-2.5 rounded-lg text-xs font-semibold shadow-xs">
+            + Registar para a Carolina
+          </button>
+        </form>
+      </div>
+
+      <div class="flex items-center justify-between px-1 pt-1">
+        <h2 class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Histórico da Carolina</h2>
+        <span class="text-[11px] text-gray-400">Em tempo real</span>
+      </div>
+
+      <div id="carolina-logs-list" class="space-y-2">
+        <!-- Renderizado dinamicamente -->
+      </div>
+    </section>
+
+    <!-- SEÇÃO: COMPRAS -->
+    <section id="sec-shopping" class="space-y-4 hidden">
+      <div class="bg-white dark:bg-slate-800 p-3.5 rounded-xl shadow-xs border border-gray-200/80 dark:border-slate-700">
+        <form onsubmit="handleNewShopping(event)" class="flex gap-2">
+          <input type="text" id="input-shopping" placeholder="Ex: Fruta, Iogurte, Material escolar..." required
+            class="flex-1 bg-gray-100 dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-xs rounded-lg px-3 py-2.5 focus:outline-hidden focus:ring-2 focus:ring-blue-500">
+          <select id="select-shopping-cat" class="bg-gray-100 dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-[11px] rounded-lg px-2 py-2">
+            <option value="supermercado">🛒 Super</option>
+            <option value="carolina">👧 Carolina</option>
+            <option value="farmacia">💊 Farmácia</option>
+            <option value="casa">🏠 Casa</option>
+          </select>
+          <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-semibold shadow-xs">
+            +
+          </button>
+        </form>
+      </div>
+
+      <div class="flex items-center justify-between px-1">
+        <h2 class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Itens em Falta</h2>
+        <span id="shopping-count" class="text-[11px] text-gray-400">0 itens</span>
+      </div>
+
+      <div id="shopping-list" class="space-y-2">
+        <!-- Renderizado dinamicamente -->
+      </div>
+    </section>
+
+    <!-- SEÇÃO: TAREFAS -->
+    <section id="sec-tasks" class="space-y-4 hidden">
+      <div class="bg-white dark:bg-slate-800 p-3.5 rounded-xl shadow-xs border border-gray-200/80 dark:border-slate-700">
+        <form onsubmit="handleNewTask(event)" class="space-y-2">
+          <input type="text" id="input-task-title" placeholder="Nova tarefa da casa..." required
+            class="w-full bg-gray-100 dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-xs rounded-lg px-3 py-2.5 focus:outline-hidden focus:ring-2 focus:ring-blue-500">
+          <div class="flex gap-2">
+            <select id="select-task-assigned" class="flex-1 bg-gray-100 dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-[11px] rounded-lg px-2 py-2">
+              <option value="Ambos">👥 Ambos</option>
+              <option value="André">👨 André</option>
+              <option value="Esposa">👩 Esposa</option>
+            </select>
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-xs flex-1">
+              Adicionar Tarefa
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="flex items-center justify-between px-1">
+        <h2 class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Afazeres Domésticos</h2>
+        <span id="tasks-count" class="text-[11px] text-gray-400">0 pendentes</span>
+      </div>
+
+      <div id="tasks-list" class="space-y-2">
+        <!-- Renderizado dinamicamente -->
+      </div>
+    </section>
+
+    <!-- SEÇÃO: NOTAS RÁPIDAS -->
+    <section id="sec-notes" class="space-y-4 hidden">
+      <div class="bg-white dark:bg-slate-800 p-3.5 rounded-xl shadow-xs border border-gray-200/80 dark:border-slate-700">
+        <form onsubmit="handleNewNote(event)" class="space-y-2">
+          <input type="text" id="input-note-title" placeholder="Título da nota..." required
+            class="w-full bg-gray-100 dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-xs rounded-lg px-3 py-2 font-bold">
+          <textarea id="input-note-content" rows="2" placeholder="Conteúdo da nota..." required
+            class="w-full bg-gray-100 dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-xs rounded-lg px-3 py-2"></textarea>
+          <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-semibold">
+            Guardar Nota Partilhada
+          </button>
+        </form>
+      </div>
+
+      <div id="notes-list" class="grid grid-cols-1 gap-2.5">
+        <!-- Renderizado dinamicamente -->
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    const tg = window.Telegram?.WebApp;
+    if (tg) {
+      tg.ready();
+      tg.expand();
+      
+      if (tg.colorScheme === 'dark') {
+        document.documentElement.classList.add('dark');
+      }
+      
+      const user = tg.initDataUnsafe?.user;
+      if (user) {
+        document.getElementById('user-greeting').innerText = `Olá, ${user.first_name || 'Família'} 👋`;
+      }
+    }
+
+    let activeTab = 'carolina';
+
+    function switchTab(tab) {
+      activeTab = tab;
+      ['carolina', 'shopping', 'tasks', 'notes'].forEach(t => {
+        document.getElementById(`sec-${t}`).classList.add('hidden');
+        const btn = document.getElementById(`tab-${t}`);
+        btn.className = "tab-btn flex-1 py-1.5 text-center rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-900";
+      });
+
+      document.getElementById(`sec-${tab}`).classList.remove('hidden');
+      const activeBtn = document.getElementById(`tab-${tab}`);
+      if (tab === 'carolina') {
+        activeBtn.className = "tab-btn flex-1 py-1.5 text-center rounded-lg text-pink-600 font-bold bg-pink-50 dark:bg-slate-800 dark:text-pink-400";
+      } else {
+        activeBtn.className = "tab-btn flex-1 py-1.5 text-center rounded-lg text-blue-600 font-bold bg-blue-50 dark:bg-slate-800 dark:text-blue-400";
+      }
+      
+      if (tg?.HapticFeedback) tg.HapticFeedback.selectionChanged();
+    }
+
+    // --- REQUISIÇÕES: CAROLINA (ESCOLA FALTAS, ACTIVIDADES, CONSULTAS) ---
+    async function loadCarolinaLogs() {
+      try {
+        const res = await fetch('/api/family/baby');
+        const logs = await res.json();
+        const container = document.getElementById('carolina-logs-list');
+
+        if (!logs || logs.length === 0) {
+          container.innerHTML = `<p class="text-center text-xs text-gray-400 py-6">Nenhum registo de faltas, atividades ou consultas.</p>`;
+          return;
+        }
+
+        container.innerHTML = logs.map(l => {
+          let icon = '🏫';
+          let tagColor = 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300';
+          let label = 'Escola Faltas';
+
+          if (l.event_type === 'actividades' || l.event_type === 'atividade') {
+            icon = '🎨';
+            tagColor = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300';
+            label = 'Actividades';
+          } else if (l.event_type === 'consultas' || l.event_type === 'saude') {
+            icon = '🩺';
+            tagColor = 'bg-pink-100 text-pink-800 dark:bg-pink-950/60 dark:text-pink-300';
+            label = 'Consultas';
+          }
+
+          const time = new Date(l.logged_time || l.created_at).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+          return `
+            <div class="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 shadow-2xs">
+              <div class="flex items-center space-x-3 flex-1 min-w-0">
+                <span class="text-xl">${icon}</span>
+                <div class="truncate">
+                  <div class="flex items-center space-x-1.5">
+                    <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-sm ${tagColor} uppercase">${label}</span>
+                    <span class="text-[10px] text-gray-400">${time}</span>
+                  </div>
+                  <p class="text-xs font-semibold text-gray-900 dark:text-gray-100 mt-0.5">${l.details}</p>
+                </div>
+              </div>
+              <button onclick="deleteCarolinaLog('${l.id}')" class="text-gray-400 hover:text-red-500 text-xs p-1">✕</button>
+            </div>
+          `;
+        }).join('');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function quickCarolinaLog(eventType, details) {
+      const user = tg?.initDataUnsafe?.user || {};
+      await fetch('/api/family/baby', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventType, details, user })
+      });
+      if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+      loadCarolinaLogs();
+    }
+
+    async function handleCustomCarolinaLog(e) {
+      e.preventDefault();
+      const input = document.getElementById('input-carolina-details');
+      const select = document.getElementById('select-carolina-type');
+      const details = input.value.trim();
+      const eventType = select.value;
+      if (!details) return;
+
+      const user = tg?.initDataUnsafe?.user || {};
+      await fetch('/api/family/baby', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventType, details, user })
+      });
+
+      input.value = '';
+      if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+      loadCarolinaLogs();
+    }
+
+    async function deleteCarolinaLog(id) {
+      await fetch(`/api/family/baby/${id}`, { method: 'DELETE' });
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+      loadCarolinaLogs();
+    }
+
+    // --- REQUISIÇÕES: COMPRAS ---
+    async function loadShopping() {
+      try {
+        const res = await fetch('/api/family/shopping');
+        const items = await res.json();
+        const container = document.getElementById('shopping-list');
+        document.getElementById('shopping-count').innerText = `${items.filter(i => !i.completed).length} pendentes`;
+
+        if (items.length === 0) {
+          container.innerHTML = `<p class="text-center text-xs text-gray-400 py-6">Tudo comprado! A lista está vazia 🎉</p>`;
+          return;
+        }
+
+        container.innerHTML = items.map(it => `
+          <div class="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 shadow-2xs">
+            <div class="flex items-center space-x-3 flex-1 min-w-0" onclick="toggleShopping('${it.id}', ${!it.completed})">
+              <input type="checkbox" ${it.completed ? 'checked' : ''} class="w-4 h-4 rounded-sm text-blue-600 focus:ring-0 cursor-pointer">
+              <span class="text-xs truncate ${it.completed ? 'line-through text-gray-400' : 'font-medium'}">${it.item_text || it.text}</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="text-[10px] px-1.5 py-0.5 rounded-sm bg-gray-100 dark:bg-slate-700 text-gray-500 uppercase">${it.category || 'geral'}</span>
+              <button onclick="deleteShopping('${it.id}')" class="text-red-400 hover:text-red-600 p-1 text-xs">✕</button>
+            </div>
+          </div>
+        `).join('');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function handleNewShopping(e) {
+      e.preventDefault();
+      const input = document.getElementById('input-shopping');
+      const cat = document.getElementById('select-shopping-cat').value;
+      const text = input.value.trim();
+      if (!text) return;
+
+      const user = tg?.initDataUnsafe?.user || {};
+      await fetch('/api/family/shopping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemText: text, category: cat, user })
+      });
+
+      input.value = '';
+      if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+      loadShopping();
+    }
+
+    async function toggleShopping(id, completed) {
+      await fetch(`/api/family/shopping/${id}/toggle`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed })
+      });
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+      loadShopping();
+    }
+
+    async function deleteShopping(id) {
+      await fetch(`/api/family/shopping/${id}`, { method: 'DELETE' });
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+      loadShopping();
+    }
+
+    // --- REQUISIÇÕES: TAREFAS ---
+    async function loadTasks() {
+      try {
+        const res = await fetch('/api/family/tasks');
+        const tasks = await res.json();
+        const container = document.getElementById('tasks-list');
+        document.getElementById('tasks-count').innerText = `${tasks.filter(t => !t.completed).length} pendentes`;
+
+        if (tasks.length === 0) {
+          container.innerHTML = `<p class="text-center text-xs text-gray-400 py-6">Nenhuma tarefa pendente! Casa impecável ✨</p>`;
+          return;
+        }
+
+        container.innerHTML = tasks.map(t => `
+          <div class="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 shadow-2xs">
+            <div class="flex items-center space-x-3 flex-1 min-w-0" onclick="toggleTask('${t.id}', ${!t.completed})">
+              <input type="checkbox" ${t.completed ? 'checked' : ''} class="w-4 h-4 rounded-sm text-blue-600 focus:ring-0 cursor-pointer">
+              <div>
+                <p class="text-xs truncate ${t.completed ? 'line-through text-gray-400' : 'font-medium'}">${t.title || t.text}</p>
+                <p class="text-[10px] text-gray-400">Atribuído a: ${t.assigned_to || 'Ambos'}</p>
+              </div>
+            </div>
+            <button onclick="deleteTask('${t.id}')" class="text-red-400 hover:text-red-600 p-1 text-xs">✕</button>
+          </div>
+        `).join('');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function handleNewTask(e) {
+      e.preventDefault();
+      const titleInput = document.getElementById('input-task-title');
+      const assigned = document.getElementById('select-task-assigned').value;
+      const title = titleInput.value.trim();
+      if (!title) return;
+
+      const user = tg?.initDataUnsafe?.user || {};
+      await fetch('/api/family/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, assignedTo: assigned, user })
+      });
+
+      titleInput.value = '';
+      if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+      loadTasks();
+    }
+
+    async function toggleTask(id, completed) {
+      await fetch(`/api/family/tasks/${id}/toggle`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed })
+      });
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+      loadTasks();
+    }
+
+    async function deleteTask(id) {
+      await fetch(`/api/family/tasks/${id}`, { method: 'DELETE' });
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+      loadTasks();
+    }
+
+    // --- REQUISIÇÕES: NOTAS ---
+    async function loadNotes() {
+      try {
+        const res = await fetch('/api/family/notes');
+        const notes = await res.json();
+        const container = document.getElementById('notes-list');
+
+        if (notes.length === 0) {
+          container.innerHTML = `<p class="text-center text-xs text-gray-400 py-6">Nenhuma nota partilhada.</p>`;
+          return;
+        }
+
+        container.innerHTML = notes.map(n => `
+          <div class="p-3.5 rounded-xl bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 shadow-2xs space-y-1 relative">
+            <button onclick="deleteNote('${n.id}')" class="absolute top-2.5 right-2.5 text-gray-400 hover:text-red-500 text-xs">✕</button>
+            <h3 class="text-xs font-bold text-blue-600 dark:text-blue-400">${n.title}</h3>
+            <p class="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-wrap">${n.content}</p>
+            <p class="text-[9px] text-gray-400 pt-1">Por ${n.created_by_name || 'André'}</p>
+          </div>
+        `).join('');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function handleNewNote(e) {
+      e.preventDefault();
+      const titleInput = document.getElementById('input-note-title');
+      const contentInput = document.getElementById('input-note-content');
+      const title = titleInput.value.trim();
+      const content = contentInput.value.trim();
+      if (!title || !content) return;
+
+      const user = tg?.initDataUnsafe?.user || {};
+      await fetch('/api/family/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, content, user })
+      });
+
+      titleInput.value = '';
+      contentInput.value = '';
+      if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+      loadNotes();
+    }
+
+    async function deleteNote(id) {
+      await fetch(`/api/family/notes/${id}`, { method: 'DELETE' });
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+      loadNotes();
+    }
+
+    // Inicialização
+    loadCarolinaLogs();
+    loadShopping();
+    loadTasks();
+    loadNotes();
+  </script>
+</body>
+</html>

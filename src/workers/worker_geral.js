@@ -180,6 +180,48 @@ async function handleBriefing() {
   return briefing;
 }
 
+// ─── Nutrição, Proteína e Ergonomia ─────────────────────────────────────────
+
+function handleNutricao() {
+  return `🥩 *Plano Nutricional de Alta Proteína*\n\n` +
+    `🎯 *Meta Diária:* 160g Proteína (~2g/kg peso corporal)\n\n` +
+    `*1. Cottage Cheese c/ Aveia ou Nestum PRO*\n` +
+    `• 200g Cottage Milbona + 35g Aveia/Nestum PRO + Canela\n` +
+    `• Macros: *28g Proteína* | 26g HC | 4g Gord | *252 kcal*\n\n` +
+    `*2. Lombo de Porco em Air-Fryer*\n` +
+    `• 250g Lombo limpo temperado com alho e orégãos (18-22 min a 180ºC)\n` +
+    `• Macros: *54g Proteína* | 30g HC | 8g Gord | *408 kcal*\n\n` +
+    `*3. Peito de Peru Salteado c/ Vegetais Freshona*\n` +
+    `• 250g Peru + 200g Vegetais wok (8 min)\n` +
+    `• Macros: *58g Proteína* | 14g HC | 6g Gord | *342 kcal*\n\n` +
+    `💡 _Registar ingestão:_ \`/proteina 54 : Lombo de porco com arroz\``;
+}
+
+function handleErgonomia() {
+  return `🏋️ *Diretrizes de Ergonomia, Postura & Coluna*\n\n` +
+    `• *Lombar:* Apoio lombar ativo a 105º-110º de inclinação.\n` +
+    `• *Pescoço & Olhos:* Topo do monitor exatamente na linha direta dos olhos.\n` +
+    `• *Pausa Ativa:* A cada 2 horas de condução ou código, 5 minutos de descompressão.\n` +
+    `• *Hidratação:* Mínimo de 2.5 Litros de água por dia.`;
+}
+
+function handleProteina(input) {
+  const match = input.match(/^(\d+)\s*(?::\s*(.*))?$/);
+  if (!match) {
+    return `💡 *Como registar proteína:*\n\`/proteina <gramas> : <refeição>\`\nExemplo: \`/proteina 54 : Almoço lombo air-fryer\``;
+  }
+  const grams = parseInt(match[1], 10);
+  const desc = match[2] || 'Refeição registada';
+  const meta = 160;
+
+  familyDb.addNote('🍗 Proteína', `${grams}g - ${desc}`, 'emerald', { first_name: 'André' });
+
+  return `🍗 *Registo Nutricional Guardado!*\n\n` +
+    `• Refeição: *${desc}* (+${grams}g Proteína)\n` +
+    `• Meta diária: *${meta}g*\n\n` +
+    `_Guardado nas notas e acessível no briefing de hoje!_`;
+}
+
 // ─── Dispatcher Principal ───────────────────────────────────────────────────
 
 export async function handle(text) {
@@ -187,6 +229,12 @@ export async function handle(text) {
   const trimmed = text.trim();
 
   if (/^\/(briefing|resumo|dia)\b/i.test(trimmed)) return handleBriefing();
+  if (/^\/(nutricao|dieta|macros)\b/i.test(trimmed)) return handleNutricao();
+  if (/^\/ergonomia\b/i.test(trimmed)) return handleErgonomia();
+  if (/^\/proteina\b/i.test(trimmed)) {
+    const raw = trimmed.replace(/^\/proteina\s*/i, '').trim();
+    return handleProteina(raw);
+  }
 
   if (/^\/(compras?)\b/i.test(trimmed)) {
     const resto = trimmed.replace(/^\/(compras?)\s*/i, '').trim();

@@ -3,4 +3,7 @@ node_modules/
 logs/
 data/geral_data.json
 *.log
+*.db-shm
+*.db-wal
+family.db
 .DS_Store

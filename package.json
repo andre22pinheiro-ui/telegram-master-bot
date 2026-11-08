@@ -1,7 +1,7 @@
 {
   "name": "telegram-master-bot",
   "version": "1.0.0",
-  "description": "Bot Orquestrador Telegram com arquitetura Master-Worker modular",
+  "description": "Bot Orquestrador Telegram com arquitetura Master-Worker unificada",
   "type": "module",
   "main": "index.js",
   "scripts": {
@@ -13,8 +13,13 @@
     "pm2:logs": "pm2 logs telegram-master-bot"
   },
   "dependencies": {
-    "axios": "^1.6.8",
+    "@octokit/rest": "^22.0.1",
+    "@supabase/supabase-js": "^2.119.0",
+    "axios": "^1.21.0",
+    "better-sqlite3": "^13.0.3",
+    "cors": "^2.8.5",
     "dotenv": "^16.4.7",
+    "express": "^4.21.2",
     "telegraf": "^4.16.3"
   },
   "engines": {
@@ -23,4 +28,3 @@
   "author": "André Pinheiro",
   "license": "MIT"
 }
-

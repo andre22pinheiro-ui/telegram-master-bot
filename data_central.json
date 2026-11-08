@@ -1,0 +1,32 @@
+{
+  "version": "2.0.0",
+  "lastUpdated": "2026-11-07T08:01:15.848Z",
+  "users": {},
+  "pessoal": {
+    "shopping": [],
+    "tasks": [],
+    "notes": [],
+    "nutritionLogs": [
+      {
+        "id": "1794037443366",
+        "date": "2026-11-07",
+        "proteinGrams": 54,
+        "description": "Lombo de porco em air fryer",
+        "timestamp": "2026-11-07T07:44:03.366Z"
+      }
+    ]
+  },
+  "frotas": {
+    "savedRoutes": [],
+    "drivers": [],
+    "vehicles": []
+  },
+  "immo": {
+    "savedProperties": [],
+    "evaluations": []
+  },
+  "dev": {
+    "managedApps": [],
+    "deployLogs": []
+  }
+}

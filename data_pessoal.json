@@ -1,0 +1,14 @@
+{
+  "shopping": [],
+  "tasks": [],
+  "notes": [],
+  "nutritionLogs": [
+    {
+      "id": "1794037443366",
+      "date": "2026-11-07",
+      "proteinGrams": 54,
+      "description": "Lombo de porco em air fryer",
+      "timestamp": "2026-11-07T07:44:03.366Z"
+    }
+  ]
+}
