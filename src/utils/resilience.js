@@ -65,3 +65,4 @@ export async function safeExecute(
     return `⚠️ *Aviso temporário em ${workerName}*\n\nNão foi possível concluir esta operação específica neste momento. O bot principal continua operacional.`;
   }
 }
+

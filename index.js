@@ -14,6 +14,13 @@ import { analyzeImageBuffer, downloadTelegramPhoto } from './src/shared/multimod
 import { uploadToCloudinary } from './src/shared/cloudinaryCdn.js';
 import { safeExecute } from './src/utils/resilience.js';
 import { cleanChatMiddleware } from './src/shared/security.js';
+import { 
+  getTvCockpit, 
+  searchChannels, 
+  formatSearchResults, 
+  getXtreamCredentialsMarkdown, 
+  getVlcHelpMarkdown 
+} from './src/services/tvService.js';
 import { existsSync, readFileSync, mkdirSync } from 'fs';
 import path from 'path';
 
@@ -79,6 +86,7 @@ function getMasterKeyboard() {
       Markup.button.callback('☀️ Briefing de Hoje', 'act_briefing')
     ],
     [
+      Markup.button.callback('📺 TV & Canais IPTV', 'act_tv_menu'),
       Markup.button.callback('🌐 Todas as 9 Mini Apps', 'act_all_apps')
     ]
   ]);
@@ -156,6 +164,18 @@ async function rotear(ctx, text) {
   log.info(`Roteando para worker: ${intent}`);
 
   switch (intent) {
+    case 'TV': {
+      if (/canal|canais/i.test(text)) {
+        const query = text.replace(/.*(canal|canais)\s*/i, '').trim();
+        const results = searchChannels(query);
+        const formatted = formatSearchResults(query || 'Populares', results);
+        await sendReply(ctx, formatted.text, formatted.keyboard);
+        return null;
+      }
+      const cockpit = getTvCockpit();
+      await sendReply(ctx, cockpit.text, cockpit.keyboard);
+      return null;
+    }
     case 'DEV':
       return await safeExecute(() => handleDev(text), 'Dev (Engenharia)', 8000);
     case 'FROTAS':
@@ -204,6 +224,18 @@ bot.start(async (ctx) => {
 
 bot.command(['menu', 'cockpit', 'painel'], async (ctx) => {
   await sendReply(ctx, `🎛️ *Menu Principal de Controlo:*`, getMasterKeyboard());
+});
+
+bot.command(['tv', 'iptv', 'matchpro_tv', 'vlc'], async (ctx) => {
+  const cockpit = getTvCockpit();
+  await sendReply(ctx, cockpit.text, cockpit.keyboard);
+});
+
+bot.command(['canal', 'canais'], async (ctx) => {
+  const text = ctx.message.text.replace(/^\/(canal|canais)\s*/i, '').trim();
+  const results = searchChannels(text);
+  const formatted = formatSearchResults(text || 'Populares', results);
+  await sendReply(ctx, formatted.text, formatted.keyboard);
 });
 
 bot.command(['apps', 'app', 'catalogo', 'vercel'], async (ctx) => {
@@ -421,6 +453,49 @@ bot.action('immo_felgueiras', async (ctx) => {
   await sendReply(ctx, resp);
 });
 
+bot.action('act_tv_menu', async (ctx) => {
+  await ctx.answerCbQuery();
+  const cockpit = getTvCockpit();
+  await sendReply(ctx, cockpit.text, cockpit.keyboard);
+});
+
+bot.action('act_tv_creds', async (ctx) => {
+  await ctx.answerCbQuery();
+  const credsMd = getXtreamCredentialsMarkdown();
+  await sendReply(ctx, credsMd, Markup.inlineKeyboard([
+    [Markup.button.callback('📺 Voltar ao Menu TV', 'act_tv_menu')]
+  ]));
+});
+
+bot.action('act_tv_help', async (ctx) => {
+  await ctx.answerCbQuery();
+  const helpMd = getVlcHelpMarkdown();
+  await sendReply(ctx, helpMd, Markup.inlineKeyboard([
+    [Markup.button.callback('📺 Voltar ao Menu TV', 'act_tv_menu')]
+  ]));
+});
+
+bot.action('act_tv_download_pt', async (ctx) => {
+  await ctx.answerCbQuery('A enviar lista M3U...');
+  const m3uPath = existsSync('c:/Users/Surface_Dpc/Desktop/PORTUGAL_COMPLETO.m3u')
+    ? 'c:/Users/Surface_Dpc/Desktop/PORTUGAL_COMPLETO.m3u'
+    : path.resolve('./public/portugal.m3u');
+
+  if (existsSync(m3uPath)) {
+    await ctx.replyWithDocument(
+      { source: m3uPath, filename: 'PORTUGAL_COMPLETO.m3u' },
+      { caption: '🇵🇹 *Lista M3U Completa de Portugal (776 canais)*\n\nToca no ficheiro para abrir diretamente no VLC ou leitor IPTV do telemóvel!', parse_mode: 'Markdown' }
+    );
+  } else {
+    await ctx.reply('⚠️ O ficheiro M3U local não foi encontrado.');
+  }
+});
+
+bot.action('act_main_menu', async (ctx) => {
+  await ctx.answerCbQuery();
+  await sendReply(ctx, `🎛️ *Menu Principal de Controlo:*`, getMasterKeyboard());
+});
+
 bot.on('text', async (ctx) => {
   const text = ctx.message.text;
   if (!text || text.trim().length === 0) return;
@@ -428,7 +503,9 @@ bot.on('text', async (ctx) => {
   try {
     await ctx.sendChatAction('typing');
     const resposta = await rotear(ctx, text);
-    await sendReply(ctx, resposta);
+    if (resposta) {
+      await sendReply(ctx, resposta);
+    }
   } catch (err) {
     log.error('Erro ao processar mensagem no Master', err.message);
     await ctx.reply('⚠️ Erro interno. Tenta novamente em instantes.');
@@ -788,6 +865,21 @@ const server = http.createServer((req, res) => {
   if (urlPath.startsWith('/api/family')) {
     const handled = handleFamilyApi(req, res, urlPath, req.method);
     if (handled) return;
+  }
+
+  // 4. Listas M3U (IPTV / MatchPro / Portugal)
+  if (urlPath === '/portugal.m3u' || urlPath === '/api/portugal.m3u') {
+    const ptM3u = existsSync('c:/Users/Surface_Dpc/Desktop/PORTUGAL_COMPLETO.m3u')
+      ? 'c:/Users/Surface_Dpc/Desktop/PORTUGAL_COMPLETO.m3u'
+      : path.resolve('./public/portugal.m3u');
+    if (existsSync(ptM3u)) {
+      res.writeHead(200, {
+        'Content-Type': 'audio/x-mpegurl; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      });
+      res.end(readFileSync(ptM3u));
+      return;
+    }
   }
 
   res.writeHead(404, { 'Content-Type': 'application/json' });

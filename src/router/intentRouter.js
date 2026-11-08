@@ -32,6 +32,13 @@ const INTENT_PATTERNS = [
     ],
   },
   {
+    intent: 'TV',
+    patterns: [
+      /^\/(tv|iptv|canais|canal|matchpro_tv|vlc|stream)\b/i,
+      /\b(tv|iptv|canais|canal|televis[aã]o|vlc|m3u|sport\s*tv|dazn|desenhos\s*animados|filmes|tvcine|xtream|matchpro)\b/i,
+    ],
+  },
+  {
     intent: 'GERAL',
     patterns: [
       /^\/(compras?|notas?|briefing|tarefa|lembrete|lista|agenda|memo|carolina|nutricao|dieta|proteina|ergonomia)\b/i,
