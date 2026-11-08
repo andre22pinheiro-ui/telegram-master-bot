@@ -1,0 +1,115 @@
+================================================================================
+  MANUAL TÉCNICO: ARQUITETURA MULTI-BOT TELEGRAM (MASTER-WORKER COM TELEGRAF E PM2)
+================================================================================
+
+Este projeto implementa uma arquitetura modular de alta disponibilidade para o Telegram,
+onde um Bot Orquestrador Central (Master) recebe todas as ordens e reencaminha para
+microsserviços especializados (Workers), mantendo isolamento de memória, tolerância a falhas
+e execução paralela gerida pelo PM2.
+
+--------------------------------------------------------------------------------
+1. COMO CONFIGURAR OS BOTS NO @BotFather (TELEGRAM)
+--------------------------------------------------------------------------------
+
+Podes operar o sistema de duas formas:
+A) Modo Unificado: Configuras apenas o TELEGRAM_MASTER_TOKEN e ele atua como canal único.
+B) Modo Múltiplos Bots: Crias um bot isolado para cada worker no @BotFather.
+
+Passo a Passo no @BotFather (https://t.me/BotFather):
+1. Abre o chat com @BotFather no Telegram.
+2. Envia o comando: /newbot
+3. Segue as instruções para criar os seguintes bots:
+   - Bot Master:
+     Nome: "André Master Bot"
+     Username: "AndreMasterOrchestratorBot" (deve terminar em bot)
+     -> Copia o token gerado para TELEGRAM_MASTER_TOKEN no teu ficheiro .env.
+
+   - Worker Dev (Opcional se quiseres canal direto):
+     Nome: "André Dev Worker"
+     Username: "AndreDevWorkerBot"
+     -> Copia o token para TELEGRAM_DEV_TOKEN.
+
+   - Worker Frotas (Opcional):
+     Nome: "André Frotas Worker"
+     Username: "AndreFrotasWorkerBot"
+     -> Copia o token para TELEGRAM_FROTAS_TOKEN.
+
+   - Worker Imobiliário (Opcional):
+     Nome: "André Immo Worker"
+     Username: "AndreImmoWorkerBot"
+     -> Copia o token para TELEGRAM_IMMO_TOKEN.
+
+   - Worker Pessoal (Opcional):
+     Nome: "André Pessoal Worker"
+     Username: "AndrePessoalWorkerBot"
+     -> Copia o token para TELEGRAM_PESSOAL_TOKEN.
+
+4. Obter o teu Chat ID Autorizado:
+   - Envia uma mensagem para o bot @userinfobot no Telegram.
+   - Copia o "Id" numérico (ex: 950415577).
+   - Cola no .env em: AUTHORIZED_CHAT_ID=950415577
+
+--------------------------------------------------------------------------------
+2. INSTALAÇÃO DAS DEPENDÊNCIAS
+--------------------------------------------------------------------------------
+
+Acede à pasta do projeto no teu terminal PowerShell / Bash:
+  cd c:\Users\Surface_Dpc\Desktop\projectos\telegram-multi-bot
+
+Copia o ficheiro de exemplo para o .env real:
+  copy .env.example .env
+
+Instala todas as dependências requeridas (Telegraf, Express, Dotenv, Cors):
+  npm install
+
+--------------------------------------------------------------------------------
+3. INICIALIZAÇÃO E GESTÃO COM PM2
+--------------------------------------------------------------------------------
+
+O ficheiro ecosystem.config.cjs configura 5 processos independentes com reinício automático
+e limite de memória:
+  - bot-master (Porta 5000)
+  - worker-dev (Porta 5001)
+  - worker-frotas (Porta 5002)
+  - worker-immo (Porta 5003)
+  - worker-pessoal (Porta 5004)
+
+Comandos essenciais do PM2:
+
+1. Iniciar todos os bots e microsserviços em paralelo:
+   npm run start
+   (ou: npx pm2 start ecosystem.config.cjs)
+
+2. Verificar o estado em tempo real de cada worker:
+   npm run status
+   (ou: npx pm2 status)
+
+3. Consultar os registos e logs em direto:
+   npm run logs
+   (Para ver apenas o master: npx pm2 logs bot-master)
+
+4. Reiniciar todos os processos (após alterar chaves no .env):
+   npm run restart
+
+5. Parar todos os bots:
+   npm run stop
+
+--------------------------------------------------------------------------------
+4. COMUNICAÇÃO INTERNA MASTER-WORKER (REST / IPC)
+--------------------------------------------------------------------------------
+
+- O Bot Master recebe o input do utilizador, analisa o comando ou linguagem natural,
+  e efetua um POST HTTP para o endpoint /execute do worker correspondente:
+    Headers: { "x-ipc-secret": INTERNAL_IPC_SECRET }
+    Body: { "action": "process_message", "text": "...", "command": "...", "args": "..." }
+
+- Os workers processam a ordem em microsserviço isolado e respondem em JSON:
+    { "success": true, "reply": "..." }
+
+- O Master recebe o output, aplica quebra segura de mensagens para limites do Telegram
+  e entrega a resposta ao utilizador no chat.
+
+- Caso um worker falhe ou fique indisponível, os outros continuam 100% operacionais,
+  e o Master informa o estado através do comando /status.
+================================================================================
+
