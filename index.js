@@ -247,31 +247,32 @@ server.listen(PORT, () => {
   log.info(`Servidor HTTP ativo na porta ${PORT} (health check para Render.com)`);
 });
 
-// ─── Arranque Resiliente de Todos os Bots Ativos ─────────────────────────────
+// ─── Arranque Paralelo de Todos os Bots Ativos ─────────────────────────────
 
-async function startAllBotsWithRetry(retries = 5, delayMs = 5000) {
-  for (const { name, bot: b } of botInstances) {
-    let launched = false;
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        log.info(`A iniciar [${name}] (tentativa ${attempt}/${retries})...`);
-        await b.launch({ allowedUpdates: ['message', 'callback_query'] });
-        log.info(`✅ [${name}] ativo e a escutar com sucesso no Telegram!`);
-        launched = true;
-        break;
-      } catch (err) {
-        log.error(`⚠️ Tentativa ${attempt} de [${name}] falhou: ${err?.message || err}`);
-        if (attempt < retries) {
-          log.info(`A aguardar ${delayMs / 1000}s antes de tentar [${name}] novamente...`);
-          await new Promise((r) => setTimeout(r, delayMs));
-        }
+async function launchSingleBot(name, b, retries = 5, delayMs = 5000) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      log.info(`A iniciar [${name}] (tentativa ${attempt}/${retries})...`);
+      b.launch({ allowedUpdates: ['message', 'callback_query'] })
+        .then(() => log.info(`[${name}] Ciclo de escuta terminado.`))
+        .catch((err) => log.error(`⚠️ Erro de polling em [${name}]:`, err?.message || err));
+      log.info(`✅ [${name}] ativo e a escutar com sucesso no Telegram!`);
+      return;
+    } catch (err) {
+      log.error(`⚠️ Falha ao lançar [${name}]: ${err?.message || err}`);
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, delayMs));
       }
-    }
-    if (!launched) {
-      log.error(`Falha ao iniciar [${name}] após ${retries} tentativas. Os outros bots continuam operacionais.`);
     }
   }
 }
 
-startAllBotsWithRetry();
+function startAllBots() {
+  log.info(`A arrancar ${botInstances.length} bots em paralelo...`);
+  for (const { name, bot: b } of botInstances) {
+    launchSingleBot(name, b);
+  }
+}
+
+startAllBots();
 
