@@ -39,10 +39,17 @@ const INTENT_PATTERNS = [
     ],
   },
   {
+    intent: 'NUTRICAO',
+    patterns: [
+      /^\/(nutricao|dieta|macros?|calorias?|proteina|agua|creatina|refeic[aã]o|refeicoes|receita|alimento)\b/i,
+      /\b(nutri[cç][aã]o|dieta|macros?|calorias?|prote[ií]na|creatina|refei[cç][aã]o|refei[cç][oõ]es|almo[cç]o|jantar|pequeno[- ]almo[cç]o|lanche|receita|shake|cottage|lombo|air[- ]?fryer)\b/i,
+    ],
+  },
+  {
     intent: 'GERAL',
     patterns: [
-      /^\/(compras?|notas?|briefing|tarefa|lembrete|lista|agenda|memo|carolina|nutricao|dieta|proteina|ergonomia)\b/i,
-      /\b(comprar|compras|lista|supermercado|nota|notas|briefing|tarefa|tarefas|lembrete|lembretes|agenda|memo|recados?|carolina|escola|falta|consulta|pediatra|nutri[cç][aã]o|prote[ií]na|dieta|macros|ergonomia|postura|sa[uú]de)\b/i,
+      /^\/(compras?|notas?|briefing|tarefa|lembrete|lista|agenda|memo|carolina|ergonomia)\b/i,
+      /\b(comprar|compras|lista|supermercado|nota|notas|briefing|tarefa|tarefas|lembrete|lembretes|agenda|memo|recados?|carolina|escola|falta|consulta|pediatra|ergonomia|postura|sa[uú]de)\b/i,
     ],
   },
 ];

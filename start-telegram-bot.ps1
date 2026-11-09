@@ -1,7 +1,7 @@
 # start-telegram-bot.ps1 — Script de arranque permanente do Telegram Master Bot
 # Coloca este script no Startup do Windows para arranque automático
 
-$projectPath = "C:\Users\Surface_Dpc\.gemini\antigravity\scratch\telegram-master-bot"
+$projectPath = "C:\Users\Surface_Dpc\Desktop\projectos\telegram-master-bot"
 $logFile = "$projectPath\logs\startup.log"
 
 function Log($msg) {

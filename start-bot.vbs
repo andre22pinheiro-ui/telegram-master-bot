@@ -1,6 +1,6 @@
 Set WshShell = CreateObject("WScript.Shell")
 Dim projectPath
-projectPath = "C:\Users\Surface_Dpc\.gemini\antigravity\scratch\telegram-master-bot"
+projectPath = "C:\Users\Surface_Dpc\Desktop\projectos\telegram-master-bot"
 
 ' Iniciar PM2 com o bot
 WshShell.Run "powershell.exe -NoProfile -WindowStyle Hidden -Command ""Set-Location '" & projectPath & "'; pm2 start ecosystem.config.cjs; pm2 save --force""", 0, True

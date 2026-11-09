@@ -200,6 +200,69 @@ export const familyDb = {
     store.notes = (store.notes || []).filter(n => String(n.id) !== String(id));
     saveStore(store);
     return { success: true };
+  },
+
+  // NUTRIÇÃO & ALTA PROTEÍNA
+  getNutritionLogs() {
+    const store = ensureStore();
+    return store.nutrition_logs || [];
+  },
+  addNutritionLog({ meal = 'Refeição', protein = 0, calories = 0, carbs = 0, fats = 0, water_ml = 0, creatina = false, notes = '', user = {} } = {}) {
+    const store = ensureStore();
+    const id = Date.now().toString();
+    const name = user.first_name || user.username || 'André';
+    const log = {
+      id,
+      meal,
+      protein: Number(protein) || 0,
+      calories: Number(calories) || 0,
+      carbs: Number(carbs) || 0,
+      fats: Number(fats) || 0,
+      water_ml: Number(water_ml) || 0,
+      creatina: Boolean(creatina),
+      notes: notes || '',
+      created_by_name: name,
+      created_at: new Date().toISOString()
+    };
+    store.nutrition_logs = store.nutrition_logs || [];
+    store.nutrition_logs.unshift(log);
+    saveStore(store);
+    return log;
+  },
+  deleteNutritionLog(id) {
+    const store = ensureStore();
+    store.nutrition_logs = (store.nutrition_logs || []).filter(n => String(n.id) !== String(id));
+    saveStore(store);
+    return { success: true };
+  },
+  getTodayNutrition() {
+    const store = ensureStore();
+    const logs = store.nutrition_logs || [];
+    const todayStr = new Date().toLocaleDateString('pt-PT', { timeZone: 'Europe/Lisbon' });
+
+    const todayLogs = logs.filter(l => {
+      try {
+        const itemDate = new Date(l.created_at).toLocaleDateString('pt-PT', { timeZone: 'Europe/Lisbon' });
+        return itemDate === todayStr;
+      } catch {
+        return false;
+      }
+    });
+
+    const totalProtein = todayLogs.reduce((acc, cur) => acc + (cur.protein || 0), 0);
+    const totalCalories = todayLogs.reduce((acc, cur) => acc + (cur.calories || 0), 0);
+    const totalWater = todayLogs.reduce((acc, cur) => acc + (cur.water_ml || 0), 0);
+    const tookCreatina = todayLogs.some(cur => cur.creatina === true);
+
+    return {
+      todayLogs,
+      totalProtein,
+      totalCalories,
+      totalWater,
+      tookCreatina,
+      proteinTarget: 160,
+      waterTarget: 2500
+    };
   }
 };
 

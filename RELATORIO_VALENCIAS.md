@@ -45,12 +45,13 @@ flowchart TD
         DB["family_store.json + Central DB + SQLite"]
     end
 
-    subgraph Workers["5 Bots Ativos em Paralelo"]
+    subgraph Workers["6 Bots Ativos em Paralelo"]
         B_MASTER["@AndrePinheirobot<br/>(Master & Cockpit)"]
         B_DEV["@DesSofBot<br/>(Dev & Cloud)"]
         B_FROTAS["@TrasFrotBot<br/>(Frotas & RotaBus)"]
         B_IMMO["@ppspppBot<br/>(Imobiliário CMVM)"]
-        B_PESSOAL["@AndTrarBOT<br/>(Pessoal, Família & Nutrição)"]
+        B_PESSOAL["@AndTrarBOT<br/>(Pessoal & Família)"]
+        B_NUTRI["@Nutriainbot<br/>(Nutrição & Alta Proteína)"]
     end
 
     TG --> B_MASTER
@@ -58,6 +59,7 @@ flowchart TD
     TG --> B_FROTAS
     TG --> B_IMMO
     TG --> B_PESSOAL
+    TG --> B_NUTRI
 
     B_MASTER --> ROUTER
     ROUTER --> Workers
@@ -116,6 +118,17 @@ Cada bot possui autonomia para responder a comandos diretos, botões inline e ev
     * Plano alimentar de referência com cálculo de macronutrientes.
   * **Ergonomia & Saúde Ocupacional:** Diretrizes de ângulo lombar (105º-110º), alinhamento cervical e pausas ativas a cada 2 horas.
   * **Briefing Diário com IA:** Resumo matinal que cruza tarefas pendentes, compras urgentes e notas, gerando uma mensagem de foco motivacional com Gemini AI.
+
+### 🥗 6. Worker Nutrição & Alta Proteína (`@Nutriainbot`)
+* **Papel:** Especialista dedicado em nutrição desportiva, hipertrofia, dieta de alta proteína e hidratação.
+* **Valências Ativas:**
+  * **Meta Proteica Diária (160g):** Barra de progresso gráfica no chat (`[████████░░] 75%`), cálculo de défice/superávit proteico e histórico de refeições.
+  * **Registo Rápido de Refeições (`/proteina <gramas> : <prato>`):** Atribuição direta com estimativa de calorias e persistência atómica no `family_store.json`.
+  * **Registo de Hidratação (`/agua <ml>`):** Controlo da meta diária de 2.5L com botões rápidos (+250ml / +500ml).
+  * **Controlo de Creatina (`/creatina`):** Marcação diária da toma de 5g para saturação muscular contínua.
+  * **Análise Visual de Pratos por IA Multimodal (Gemini):** O utilizador envia uma fotografia do prato/refeição e a IA identifica os ingredientes e estima gramas de proteína, hidratos, lípidos e Kcal.
+  * **Receitas de Alta Proteína:** Geração instantânea de receitas rápidas com ingredientes disponíveis em casa (lombo em air-fryer, peito de peru, ovos, cottage Milbona).
+  * **Comandos Principais:** `/plano`, `/hoje`, `/proteina`, `/agua`, `/creatina`, `/macros`.
 
 ---
 

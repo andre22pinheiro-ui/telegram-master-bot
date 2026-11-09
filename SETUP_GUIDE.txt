@@ -89,7 +89,7 @@ Pré-requisitos:
 Passos:
 
   1. Navegar para o diretório do projeto:
-     cd C:\Users\Surface_Dpc\.gemini\antigravity\scratch\telegram-master-bot
+     cd C:\Users\Surface_Dpc\Desktop\projectos\telegram-master-bot
 
   2. Instalar dependências:
      npm install

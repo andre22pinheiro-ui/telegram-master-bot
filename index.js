@@ -7,6 +7,14 @@ import { handle as handleDev } from './src/workers/worker_dev.js';
 import { handle as handleFrotas } from './src/workers/worker_frotas.js';
 import { handle as handleImmo } from './src/workers/worker_immo.js';
 import { handle as handleGeral } from './src/workers/worker_geral.js';
+import { 
+  handle as handleNutricao, 
+  getPlanoNutricional, 
+  getResumoHoje, 
+  handleProteinaInput, 
+  handleAguaInput, 
+  handleCreatina 
+} from './src/workers/worker_nutricao.js';
 import { createLogger } from './src/utils/logger.js';
 import { VERCEL_APPS, buildTelegramAppsKeyboard, formatAllVercelAppsMarkdown } from './src/shared/appsCatalog.js';
 import { handleFamilyApi } from './src/shared/familyRoutes.js';
@@ -88,6 +96,10 @@ function getMasterKeyboard() {
     [
       Markup.button.callback('💻 Dev & Repos', 'act_dev'),
       Markup.button.callback('☀️ Briefing de Hoje', 'act_briefing')
+    ],
+    [
+      Markup.button.callback('🥗 Nutrição & Dieta', 'act_nutri_menu'),
+      Markup.button.url('🥗 @Nutriainbot', 'https://t.me/Nutriainbot')
     ],
     [
       Markup.button.callback('📺 TV & Canais IPTV', 'act_tv_menu'),
@@ -189,6 +201,8 @@ async function rotear(ctx, text) {
       return await safeExecute(() => handleFrotas(text), 'Frotas (RotaBus)', 8000);
     case 'IMMO':
       return await safeExecute(() => handleImmo(text), 'Immo (Avaliação)', 8000);
+    case 'NUTRICAO':
+      return await safeExecute(() => handleNutricao(text), 'Nutrição (High-Protein)', 8000);
     case 'GERAL':
     default:
       return await safeExecute(() => handleGeral(text), 'Pessoal & Família', 8000);
@@ -412,6 +426,50 @@ bot.action('act_briefing', async (ctx) => {
   await ctx.answerCbQuery('A preparar o teu briefing...');
   await ctx.sendChatAction('typing');
   const resp = await handleGeral('/briefing');
+  await sendReply(ctx, resp);
+});
+
+bot.action('act_nutri_menu', async (ctx) => {
+  await ctx.answerCbQuery();
+  const resumo = getResumoHoje();
+  await sendReply(ctx, resumo, Markup.inlineKeyboard([
+    [Markup.button.callback('🥗 Ver Plano 160g', 'act_nutri_plano')],
+    [Markup.button.callback('💧 +250ml Água', 'nutri_agua_250'), Markup.button.callback('💧 +500ml Água', 'nutri_agua_500')],
+    [Markup.button.callback('⚡ Tomar Creatina', 'nutri_creatina'), Markup.button.callback('🍗 +30g Prot', 'nutri_add_30')],
+    [Markup.button.url('🥗 Abrir @Nutriainbot', 'https://t.me/Nutriainbot'), Markup.button.callback('🎛️ Menu Principal', 'act_main_menu')]
+  ]));
+});
+
+bot.action('act_nutri_plano', async (ctx) => {
+  await ctx.answerCbQuery();
+  const plano = getPlanoNutricional();
+  await sendReply(ctx, plano, Markup.inlineKeyboard([
+    [Markup.button.callback('📊 Ver Resumo de Hoje', 'act_nutri_menu')],
+    [Markup.button.callback('🎛️ Menu Principal', 'act_main_menu')]
+  ]));
+});
+
+bot.action('nutri_agua_250', async (ctx) => {
+  await ctx.answerCbQuery('💧 +250ml adicionados!');
+  const resp = handleAguaInput('250');
+  await sendReply(ctx, resp);
+});
+
+bot.action('nutri_agua_500', async (ctx) => {
+  await ctx.answerCbQuery('💧 +500ml adicionados!');
+  const resp = handleAguaInput('500');
+  await sendReply(ctx, resp);
+});
+
+bot.action('nutri_creatina', async (ctx) => {
+  await ctx.answerCbQuery('⚡ Creatina registada!');
+  const resp = handleCreatina();
+  await sendReply(ctx, resp);
+});
+
+bot.action('nutri_add_30', async (ctx) => {
+  await ctx.answerCbQuery('🍗 +30g de proteína registada!');
+  const resp = handleProteinaInput('30 : Snack/Refeição Proteica');
   await sendReply(ctx, resp);
 });
 
@@ -856,6 +914,118 @@ if (PESSOAL_TOKEN && PESSOAL_TOKEN.trim()) {
 
   botPessoal.catch((err) => log.error('Erro no Worker Pessoal', err?.message || err));
   botInstances.push({ name: 'Pessoal (@AndTrarBOT)', bot: botPessoal });
+}
+
+// 6. WORKER NUTRIÇÃO (@Nutriainbot) ───────────────────────────────────────────
+const NUTRICAO_TOKEN = process.env.TELEGRAM_NUTRICAO_TOKEN || process.env.TELEGRAM_BOT_TOKEN_NUTRICAO;
+if (NUTRICAO_TOKEN && NUTRICAO_TOKEN.trim()) {
+  const botNutri = new Telegraf(NUTRICAO_TOKEN.trim());
+  botNutri.use(authMiddleware);
+  botNutri.use(cleanChatMiddleware);
+
+  botNutri.telegram.setChatMenuButton({
+    menu_button: {
+      type: 'web_app',
+      text: '🥗 Família & Nutrição',
+      web_app: { url: VERCEL_APPS.familiar.url }
+    }
+  }).catch(() => {});
+
+  botNutri.start(async (ctx) => {
+    const nome = ctx.from?.first_name || 'André';
+    await sendReply(
+      ctx,
+      `🥗 *Olá, ${nome}! Sou o teu Nutricionista de Alta Performance.*\n\n` +
+      `Estou programado com foco absoluto na tua meta de *160g de proteína diária*, hidratação de 2.5L e performance muscular.\n\n` +
+      `• \`/plano\` — Ver as refeições diárias recomendadas\n` +
+      `• \`/hoje\` — Ver o teu progresso de proteína, água e calorias\n` +
+      `• \`/proteina 50 : Bife\` — Registar refeição com gramas\n` +
+      `• \`/agua 500\` — Registar água consumida\n` +
+      `• \`/creatina\` — Registar a dose de 5g diária\n\n` +
+      `📸 *Envia uma foto de qualquer prato ou refeição* para eu estimar ingredientes e macros por IA!`,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('📋 Ver Plano Alimentar', 'nutri_plano'), Markup.button.callback('📊 Progresso de Hoje', 'nutri_hoje')],
+        [Markup.button.callback('💧 +250ml Água', 'nutri_agua_250'), Markup.button.callback('💧 +500ml Água', 'nutri_agua_500')],
+        [Markup.button.callback('⚡ Registar Creatina', 'nutri_creatina'), Markup.button.callback('🍗 +30g Proteína', 'nutri_add_30')],
+        [Markup.button.webApp('🏡 Abrir Mini App Família', VERCEL_APPS.familiar.url)]
+      ])
+    );
+  });
+
+  botNutri.command(['plano', 'dieta'], async (ctx) => {
+    await sendReply(ctx, getPlanoNutricional(), Markup.inlineKeyboard([
+      [Markup.button.callback('📊 Progresso de Hoje', 'nutri_hoje')]
+    ]));
+  });
+
+  botNutri.command(['hoje', 'macros', 'resumo', 'status'], async (ctx) => {
+    await sendReply(ctx, getResumoHoje(), Markup.inlineKeyboard([
+      [Markup.button.callback('💧 +250ml Água', 'nutri_agua_250'), Markup.button.callback('💧 +500ml Água', 'nutri_agua_500')],
+      [Markup.button.callback('⚡ Creatina', 'nutri_creatina'), Markup.button.callback('🍗 +30g Prot', 'nutri_add_30')]
+    ]));
+  });
+
+  botNutri.command('proteina', async (ctx) => {
+    const raw = ctx.message.text.replace(/^\/proteina\s*/i, '').trim();
+    const resp = handleProteinaInput(raw);
+    await sendReply(ctx, resp);
+  });
+
+  botNutri.command('agua', async (ctx) => {
+    const raw = ctx.message.text.replace(/^\/agua\s*/i, '').trim();
+    const resp = handleAguaInput(raw);
+    await sendReply(ctx, resp);
+  });
+
+  botNutri.command('creatina', async (ctx) => {
+    const resp = handleCreatina();
+    await sendReply(ctx, resp);
+  });
+
+  botNutri.action('nutri_plano', async (ctx) => {
+    await ctx.answerCbQuery();
+    await sendReply(ctx, getPlanoNutricional());
+  });
+
+  botNutri.action('nutri_hoje', async (ctx) => {
+    await ctx.answerCbQuery();
+    await sendReply(ctx, getResumoHoje());
+  });
+
+  botNutri.action('nutri_agua_250', async (ctx) => {
+    await ctx.answerCbQuery('💧 +250ml adicionados!');
+    const resp = handleAguaInput('250');
+    await sendReply(ctx, resp);
+  });
+
+  botNutri.action('nutri_agua_500', async (ctx) => {
+    await ctx.answerCbQuery('💧 +500ml adicionados!');
+    const resp = handleAguaInput('500');
+    await sendReply(ctx, resp);
+  });
+
+  botNutri.action('nutri_creatina', async (ctx) => {
+    await ctx.answerCbQuery('⚡ Creatina registada!');
+    const resp = handleCreatina();
+    await sendReply(ctx, resp);
+  });
+
+  botNutri.action('nutri_add_30', async (ctx) => {
+    await ctx.answerCbQuery('🍗 +30g de proteína registada!');
+    const resp = handleProteinaInput('30 : Snack/Refeição Proteica');
+    await sendReply(ctx, resp);
+  });
+
+  botNutri.on('photo', (ctx) => processPhotoWithVision(ctx, NUTRICAO_TOKEN, 'nutricao'));
+
+  botNutri.on('text', async (ctx) => {
+    await ctx.sendChatAction('typing');
+    const resp = await safeExecute(() => handleNutricao(ctx.message.text), 'Nutrição (High-Protein)', 8000);
+    await sendReply(ctx, resp);
+  });
+
+  botNutri.catch((err) => log.error('Erro no Worker Nutrição', err?.message || err));
+  botInstances.push({ name: 'Nutrição (@Nutriainbot)', bot: botNutri });
 }
 
 // ─── Encerramento Seguro ─────────────────────────────────────────────────────

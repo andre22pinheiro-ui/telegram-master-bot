@@ -25,6 +25,8 @@ services:
         sync: false
       - key: TELEGRAM_PESSOAL_TOKEN
         sync: false
+      - key: TELEGRAM_NUTRICAO_TOKEN
+        sync: false
       - key: CHAT_ID_AUTORIZADO
         sync: false
       - key: GEMINI_API_KEY

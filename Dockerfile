@@ -26,3 +26,4 @@ ENV PORT=3000
 
 # Executar o orquestrador dos 5 bots
 CMD ["node", "index.js"]
+
