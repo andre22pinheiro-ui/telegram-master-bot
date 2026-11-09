@@ -2,6 +2,7 @@
 import axios from 'axios';
 import { createLogger } from '../utils/logger.js';
 import { VERCEL_APPS, formatAllVercelAppsMarkdown } from '../shared/appsCatalog.js';
+import { askAgent } from '../services/reasoningService.js';
 
 const log = createLogger('WorkerDev');
 
@@ -93,25 +94,31 @@ function handleApks() {
   );
 }
 
-async function handleCode(userMessage) {
-  const prompt = `Responde em Português de Portugal como um Engenheiro de Software Senior e Arquiteto Cloud. Pergunta:\n${userMessage}\n\nResponde de forma clara, usando blocos de código markdown quando apropriado.`;
-  const answer = await askGemini(prompt);
-  if (!answer) return '⚠️ Assistente de código temporariamente indisponível. Configura `GEMINI_API_KEY`.';
-  return `💻 *Engenharia de Software & Cloud:*\n\n${answer}`;
+async function handleCode(userMessage, chatId = '950415577') {
+  return await askAgent({
+    chatId,
+    workerTag: 'dev',
+    prompt: userMessage
+  });
 }
 
 // ─── Dispatcher Principal ────────────────────────────────────────────────────
 
-export async function handle(text) {
-  log.info('Processando pedido DEV', { text: text.substring(0, 60) });
+export async function handle(text, ctx = {}) {
+  const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
+  log.info('Processando pedido DEV', { text: text.substring(0, 60), chatId });
   const lower = text.trim().toLowerCase();
+
+  if (/^\/(reset|limpar)\b/i.test(lower)) {
+    return await askAgent({ chatId, workerTag: 'dev', prompt: '/reset' });
+  }
 
   if (/^\/(projetos?|github|repos?)\b/.test(lower)) return handleProjetos();
   if (/^\/criar_app/.test(lower)) return handleCriarApp(text.replace(/^\/criar_app\s*/i, ''));
   if (/^\/(apps?|links?|catalogo|catalogo_apps|vercel)\b/.test(lower)) return handleApps();
   if (/^\/(apks?|download_apk|android)\b/.test(lower)) return handleApks();
 
-  return handleCode(text);
+  return handleCode(text, chatId);
 }
 
 export default { handle };

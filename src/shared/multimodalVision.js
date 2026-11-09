@@ -18,7 +18,7 @@ export async function analyzeImageBuffer(imageBuffer, mimeType = "image/jpeg", p
     "Se for erro, código ou app: aponta a linha, causa e solução técnica em detalhe. " +
     "Se for documento, recibo ou obra: resume os valores, medidas e conclusões práticas.";
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${geminiKey}`;
 
   const payload = {
     contents: [

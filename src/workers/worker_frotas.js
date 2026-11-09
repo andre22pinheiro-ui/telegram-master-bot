@@ -2,6 +2,7 @@
 import axios from 'axios';
 import { createLogger } from '../utils/logger.js';
 import { VERCEL_APPS } from '../shared/appsCatalog.js';
+import { askAgent } from '../services/reasoningService.js';
 
 const log = createLogger('WorkerFrotas');
 const ORS_API_KEY = process.env.ORS_API_KEY || '';
@@ -156,22 +157,34 @@ function handleTacografo(args) {
 
 // ─── Dispatcher ──────────────────────────────────────────────────────────────
 
-export async function handle(text) {
-  log.info('Processando pedido FROTAS', { text: text.substring(0, 60) });
+export async function handle(text, ctx = {}) {
+  const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
+  log.info('Processando pedido FROTAS', { text: text.substring(0, 60), chatId });
+  const trimmed = text.trim();
 
-  if (/^\/rota\s+/i.test(text)) return handleRota(text.replace(/^\/rota\s+/i, ''));
-  if (/^\/tacografo\s*/i.test(text)) return handleTacografo(text.replace(/^\/tacografo\s*/i, ''));
+  if (/^\/(reset|limpar)\b/i.test(trimmed)) {
+    return await askAgent({ chatId, workerTag: 'frotas', prompt: '/reset' });
+  }
 
-  return (
-    `🚛 *Gestão de Frotas, Tacógrafo & RotaBus*\n\n` +
-    `Módulo especializado em transporte rodoviário pesado e autocarros.\n\n` +
-    `• \`/rota ORIGEM para DESTINO\` — Cálculo de itinerário para pesados\n` +
-    `• \`/tacografo HORAS\` — Verificação legal (CE 561/2006)\n\n` +
-    `🌐 *Mini Apps Integradas:*\n` +
-    `• [RotaBus GPS Web](${VERCEL_APPS.rotabus.url})\n` +
-    `• [AppFrota Gestão](${VERCEL_APPS.appfrota.url})\n` +
-    `• [Download APK Android](${VERCEL_APPS.rotabus.apkUrl})`
-  );
+  if (/^\/rota\s+/i.test(trimmed)) return handleRota(trimmed.replace(/^\/rota\s+/i, ''));
+  if (/^\/tacografo\s*/i.test(trimmed)) return handleTacografo(trimmed.replace(/^\/tacografo\s*/i, ''));
+
+  if (/^\/(start|menu|ajuda)\b/i.test(trimmed)) {
+    return (
+      `🚛 *Gestão de Frotas, Tacógrafo & RotaBus VIP*\n\n` +
+      `Módulo especializado em transporte rodoviário pesado e autocarros.\n\n` +
+      `• \`/rota ORIGEM para DESTINO\` — Cálculo de itinerário para pesados\n` +
+      `• \`/tacografo HORAS\` — Verificação legal (CE 561/2006)\n\n` +
+      `💡 *Conversa & Resolução de Problemas:* Podes colocar qualquer questão sobre rotas, tempos de descanso, condução em equipa ou legislação europeia que eu analiso em detalhe!`
+    );
+  }
+
+  // Resolução inteligente de desafios complexos de frotas e diálogo livre
+  return await askAgent({
+    chatId,
+    workerTag: 'frotas',
+    prompt: trimmed
+  });
 }
 
 export default { handle };

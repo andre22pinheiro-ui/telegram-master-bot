@@ -1,6 +1,7 @@
 // src/workers/worker_immo.js — Avaliação Imobiliária (Amarante + região)
 import axios from 'axios';
 import { createLogger } from '../utils/logger.js';
+import { askAgent } from '../services/reasoningService.js';
 
 const log = createLogger('WorkerImmo');
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
@@ -123,14 +124,29 @@ function handleComandosPrincipais() {
 
 // ─── Dispatcher ──────────────────────────────────────────────────────────────
 
-export async function handle(text) {
-  log.info('Processando pedido IMMO', { text: text.substring(0, 60) });
+export async function handle(text, ctx = {}) {
+  const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
+  log.info('Processando pedido IMMO', { text: text.substring(0, 60), chatId });
+  const trimmed = text.trim();
 
-  if (/^\/(avaliacao|avaliac[aã]o|immo|imovel)\s+/i.test(text)) {
-    return handleAvaliacao(text.replace(/^\/(avaliacao|avaliac[aã]o|immo|imovel)\s+/i, ''));
+  if (/^\/(reset|limpar)\b/i.test(trimmed)) {
+    return await askAgent({ chatId, workerTag: 'immo', prompt: '/reset' });
   }
 
-  return handleComandosPrincipais();
+  if (/^\/(avaliacao|avaliac[aã]o|immo|imovel)\s+/i.test(trimmed)) {
+    return handleAvaliacao(trimmed.replace(/^\/(avaliacao|avaliac[aã]o|immo|imovel)\s+/i, ''));
+  }
+
+  if (/^\/(start|menu|ajuda)\b/i.test(trimmed)) {
+    return handleComandosPrincipais();
+  }
+
+  // Diálogo e resolução de problemas imobiliários complexos (yield, impostos, viabilidade)
+  return await askAgent({
+    chatId,
+    workerTag: 'immo',
+    prompt: trimmed
+  });
 }
 
 export default { handle };

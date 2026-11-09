@@ -196,16 +196,16 @@ async function rotear(ctx, text) {
       return null;
     }
     case 'DEV':
-      return await safeExecute(() => handleDev(text), 'Dev (Engenharia)', 8000);
+      return await safeExecute(() => handleDev(text, ctx), 'Dev (Engenharia)', 12000);
     case 'FROTAS':
-      return await safeExecute(() => handleFrotas(text), 'Frotas (RotaBus)', 8000);
+      return await safeExecute(() => handleFrotas(text, ctx), 'Frotas (RotaBus)', 12000);
     case 'IMMO':
-      return await safeExecute(() => handleImmo(text), 'Immo (Avaliação)', 8000);
+      return await safeExecute(() => handleImmo(text, ctx), 'Immo (Avaliação)', 12000);
     case 'NUTRICAO':
-      return await safeExecute(() => handleNutricao(text), 'Nutrição (High-Protein)', 8000);
+      return await safeExecute(() => handleNutricao(text, ctx), 'Nutrição (High-Protein)', 12000);
     case 'GERAL':
     default:
-      return await safeExecute(() => handleGeral(text), 'Pessoal & Família', 8000);
+      return await safeExecute(() => handleGeral(text, ctx), 'Pessoal & Família', 12000);
   }
 }
 
@@ -703,7 +703,7 @@ if (DEV_TOKEN && DEV_TOKEN.trim()) {
 
   botDev.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
-    const resp = await safeExecute(() => handleDev(ctx.message.text), 'Dev (Engenharia)', 8000);
+    const resp = await safeExecute(() => handleDev(ctx.message.text, ctx), 'Dev (Engenharia)', 12000);
     await sendReply(ctx, resp);
   });
 
@@ -785,7 +785,7 @@ if (FROTAS_TOKEN && FROTAS_TOKEN.trim()) {
 
   botFrotas.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
-    const resp = await safeExecute(() => handleFrotas(ctx.message.text), 'Frotas (RotaBus)', 8000);
+    const resp = await safeExecute(() => handleFrotas(ctx.message.text, ctx), 'Frotas (RotaBus)', 12000);
     await sendReply(ctx, resp);
   });
 
@@ -833,7 +833,7 @@ if (IMMO_TOKEN && IMMO_TOKEN.trim()) {
 
   botImmo.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
-    const resp = await safeExecute(() => handleImmo(ctx.message.text), 'Immo (Avaliação)', 8000);
+    const resp = await safeExecute(() => handleImmo(ctx.message.text, ctx), 'Immo (Avaliação)', 12000);
     await sendReply(ctx, resp);
   });
 
@@ -908,7 +908,7 @@ if (PESSOAL_TOKEN && PESSOAL_TOKEN.trim()) {
 
   botPessoal.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
-    const resp = await safeExecute(() => handleGeral(ctx.message.text), 'Pessoal & Família', 8000);
+    const resp = await safeExecute(() => handleGeral(ctx.message.text, ctx), 'Pessoal & Família', 12000);
     await sendReply(ctx, resp);
   });
 
@@ -1020,7 +1020,7 @@ if (NUTRICAO_TOKEN && NUTRICAO_TOKEN.trim()) {
 
   botNutri.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
-    const resp = await safeExecute(() => handleNutricao(ctx.message.text), 'Nutrição (High-Protein)', 8000);
+    const resp = await safeExecute(() => handleNutricao(ctx.message.text, ctx), 'Nutrição (High-Protein)', 12000);
     await sendReply(ctx, resp);
   });
 

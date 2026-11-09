@@ -2,6 +2,7 @@
 import axios from 'axios';
 import { familyDb } from '../shared/familyDb.js';
 import { createLogger } from '../utils/logger.js';
+import { askAgent } from '../services/reasoningService.js';
 
 const log = createLogger('WorkerNutricao');
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
@@ -199,9 +200,14 @@ export async function handleAnaliseIa(text) {
 
 // ─── Dispatcher Geral de Texto ──────────────────────────────────────────────
 
-export async function handle(text) {
-  log.info('Processando pedido de Nutrição', { text: text.substring(0, 60) });
+export async function handle(text, ctx = {}) {
+  const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
+  log.info('Processando pedido de Nutrição', { text: text.substring(0, 60), chatId });
   const trimmed = text.trim();
+
+  if (/^\/(reset|limpar)\b/i.test(trimmed)) {
+    return await askAgent({ chatId, workerTag: 'nutricao', prompt: '/reset' });
+  }
 
   // Comandos diretos
   if (/^\/(start|menu|ajuda)\b/i.test(trimmed)) {
@@ -215,7 +221,7 @@ export async function handle(text) {
       `• \`/agua 500\` — Registar consumo de água (ml)\n` +
       `• \`/creatina\` — Registar toma diária de 5g\n` +
       `• \`/receita atum\` — Pedir receita de alto teor proteico\n\n` +
-      `📸 *Dica:* Tira uma foto ao teu prato e envia aqui no chat para a IA analisar os macros automaticamente!`
+      `💡 *Conversa Aberta & Dúvidas:* Podes falar livremente comigo, perguntar o que comer a seguir ou pedir ajustes de macros com base no teu progresso de hoje!`
     );
   }
 
@@ -247,8 +253,16 @@ export async function handle(text) {
     return handleProteinaInput(`${quickProtMatch[1]} : ${quickProtMatch[2]}`);
   }
 
-  // Consulta em linguagem natural à IA nutricionista
-  return await handleAnaliseIa(trimmed);
+  // Consulta conversacional com raciocínio profundo e contexto em tempo real
+  const today = familyDb.getTodayNutrition();
+  const extraContext = `Hoje André consumiu ${today.totalProtein}g de ${today.proteinTarget}g de proteína, ${today.totalWater}ml de água, e creatina=${today.tookCreatina ? 'Sim' : 'Pendente'}.`;
+
+  return await askAgent({
+    chatId,
+    workerTag: 'nutricao',
+    prompt: trimmed,
+    extraContext
+  });
 }
 
 export default {

@@ -136,9 +136,11 @@ Cada bot possui autonomia para responder a comandos diretos, botões inline e ev
 
 | Recurso | Motor | Descrição Operacional |
 | :--- | :--- | :--- |
-| **Visão Multimodal** | Google Gemini 2.5 Flash *(fallback 2.0/1.5)* | Recebe fotografias enviadas para qualquer um dos 5 bots. Classifica e analisa refeições (Kcal e macros), documentos, recibos de despesa, plantas de pladur e discos de tacógrafo. |
+| **Memória Multi-Turn** | `conversationMemory.js` | Mantém o fio condutor da conversa ao longo dos turnos anteriores por chat e bot (janela deslizante de 12 mensagens com TTL de 3h). Permite diálogos contínuos e follow-ups contextuais (`/reset` para reiniciar). |
+| **Raciocínio Profundo (CoT)** | Google Gemini 3.5/3.8 Flash + Groq LPU (`gpt-oss-20b` / `qwen3.8-27b`) | Resolução de problemas complexos: tacógrafo CE 561/2006, arquitetura cloud, viabilidade imobiliária com IMT, planos de macros e estratégias familiares. |
+| **Visão Multimodal** | Google Gemini 3.8 Flash | Recebe fotografias enviadas para qualquer um dos 6 bots. Classifica e analisa refeições (Kcal e macros), documentos, recibos de despesa, plantas de pladur e discos de tacógrafo. |
 | **CDN de Imagens** | Cloudinary API | Faz upload automático das imagens recebidas e fornece link permanente seguro (`https://res.cloudinary.com/...`). |
-| **Inferência Rápida** | Groq LPU (GPT-OSS / Llama 3) | Processamento ultrarrápido com baixa latência para respostas instantâneas. |
+| **Inferência Rápida** | Groq LPU | Processamento ultrarrápido com baixa latência (~700ms) para respostas instantâneas quando há picos na nuvem. |
 | **Geocoding & Rotas** | OpenRouteService API | Tradução de localidades portuguesas para coordenadas geográficas e cálculo de distâncias reais em estrada. |
 | **Chat Limpo (Anti-Spam)** | Telegraf Middleware | Apaga automaticamente as mensagens de comando enviadas pelo utilizador para manter as janelas de chat organizadas. |
 

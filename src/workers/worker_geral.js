@@ -2,6 +2,7 @@
 import axios from 'axios';
 import { familyDb } from '../shared/familyDb.js';
 import { createLogger } from '../utils/logger.js';
+import { askAgent } from '../services/reasoningService.js';
 
 const log = createLogger('WorkerGeral');
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
@@ -224,9 +225,18 @@ function handleProteina(input) {
 
 // ─── Dispatcher Principal ───────────────────────────────────────────────────
 
-export async function handle(text) {
-  log.info('Processando pedido GERAL', { text: text.substring(0, 60) });
+export async function handle(text, ctx = {}) {
+  const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
+  log.info('Processando pedido GERAL', { text: text.substring(0, 60), chatId });
   const trimmed = text.trim();
+
+  if (/^\/(reset|limpar)\b/i.test(trimmed)) {
+    return await askAgent({ chatId, workerTag: 'pessoal', prompt: '/reset' });
+  }
+
+  if (/^\/(start|menu|ajuda)\b/i.test(trimmed)) {
+    return `🤖 *Assistente Familiar & Produtividade*\n\nComandos rápidos:\n\n🛒 \`/compras\` — Ver ou adicionar compras\n📋 \`/tarefas\` — Ver ou criar tarefas\n👧 \`/carolina\` — Escola, faltas e consultas\n📝 \`/nota Texto\` — Guardar nota rápida\n☀️ \`/briefing\` — Resumo geral do dia\n\n💡 *Conversa Aberta:* Fala livremente comigo sobre organização familiar, rotinas da Carolina ou planeamento do teu dia!`;
+  }
 
   if (/^\/(briefing|resumo|dia)\b/i.test(trimmed)) return handleBriefing();
   if (/^\/(nutricao|dieta|macros)\b/i.test(trimmed)) return handleNutricao();
@@ -265,7 +275,12 @@ export async function handle(text) {
     return `🔔 Lembrete guardado:\n*"${args}"*`;
   }
 
-  return `🤖 *Assistente Familiar & Produtividade*\n\nComandos rápidos:\n\n🛒 \`/compras\` — Ver ou adicionar compras\n📋 \`/tarefas\` — Ver ou criar tarefas\n👧 \`/carolina\` — Escola, faltas e consultas\n📝 \`/nota Texto\` — Guardar nota rápida\n☀️ \`/briefing\` — Resumo geral do dia\n\n_Podes também abrir a Mini App diretamente com o botão abaixo!_`;
+  // Conversa contínua e resolução de problemas do dia a dia pessoal e familiar
+  return await askAgent({
+    chatId,
+    workerTag: 'pessoal',
+    prompt: trimmed
+  });
 }
 
 export default { handle };
