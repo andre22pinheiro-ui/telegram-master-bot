@@ -16,6 +16,8 @@ import {
   handleCreatina 
 } from './src/workers/worker_nutricao.js';
 import { createLogger } from './src/utils/logger.js';
+import { askAgent } from './src/services/reasoningService.js';
+import { familyDb } from './src/shared/familyDb.js';
 import { VERCEL_APPS, buildTelegramAppsKeyboard, formatAllVercelAppsMarkdown } from './src/shared/appsCatalog.js';
 import { handleFamilyApi } from './src/shared/familyRoutes.js';
 import { analyzeImageBuffer, downloadTelegramPhoto } from './src/shared/multimodalVision.js';
@@ -176,37 +178,68 @@ async function processPhotoWithVision(ctx, botToken, contextTag = 'geral') {
   }
 }
 
-// ─── Roteador de Intenções do Master ─────────────────────────────────────────
+// ─── Roteador de Intenções do Master (Chat Universal estilo Gemini) ─────────
 
 async function rotear(ctx, text) {
-  const intent = detectIntent(text);
-  log.info(`Roteando para worker: ${intent}`);
+  const trimmed = text.trim();
+  const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
 
-  switch (intent) {
-    case 'TV': {
-      if (/canal|canais/i.test(text)) {
-        const query = text.replace(/.*(canal|canais)\s*/i, '').trim();
-        const results = searchChannels(query);
-        const formatted = formatSearchResults(query || 'Populares', results);
-        await sendReply(ctx, formatted.text, formatted.keyboard);
-        return null;
-      }
-      const cockpit = getTvCockpit();
-      await sendReply(ctx, cockpit.text, cockpit.keyboard);
+  // 1. Controlo de Sessão / Memória
+  if (/^\/(reset|limpar|novo|nova_conversa)\b/i.test(trimmed)) {
+    return await askAgent({ chatId, workerTag: 'master', prompt: '/reset' });
+  }
+
+  // 2. Comandos Específicos com Barra (/)
+  if (/^\/(tv|canais|canal|iptv)\b/i.test(trimmed)) {
+    if (/canal|canais/i.test(trimmed)) {
+      const query = trimmed.replace(/.*(canal|canais)\s*/i, '').trim();
+      const results = searchChannels(query);
+      const formatted = formatSearchResults(query || 'Populares', results);
+      await sendReply(ctx, formatted.text, formatted.keyboard);
       return null;
     }
-    case 'DEV':
-      return await safeExecute(() => handleDev(text, ctx), 'Dev (Engenharia)', 12000);
-    case 'FROTAS':
-      return await safeExecute(() => handleFrotas(text, ctx), 'Frotas (RotaBus)', 12000);
-    case 'IMMO':
-      return await safeExecute(() => handleImmo(text, ctx), 'Immo (Avaliação)', 12000);
-    case 'NUTRICAO':
-      return await safeExecute(() => handleNutricao(text, ctx), 'Nutrição (High-Protein)', 12000);
-    case 'GERAL':
-    default:
-      return await safeExecute(() => handleGeral(text, ctx), 'Pessoal & Família', 12000);
+    const cockpit = getTvCockpit();
+    await sendReply(ctx, cockpit.text, cockpit.keyboard);
+    return null;
   }
+
+  if (/^\/(rota|tacografo)\b/i.test(trimmed)) {
+    return await safeExecute(() => handleFrotas(trimmed, ctx), 'Frotas (RotaBus)', 12000);
+  }
+
+  if (/^\/(projetos?|github|repos?|criar_app|apps?|catalogo|apks?)\b/i.test(trimmed)) {
+    return await safeExecute(() => handleDev(trimmed, ctx), 'Dev (Engenharia)', 12000);
+  }
+
+  if (/^\/(avaliacao|avaliac[aã]o|immo|imovel)\b/i.test(trimmed)) {
+    return await safeExecute(() => handleImmo(trimmed, ctx), 'Immo (Avaliação)', 12000);
+  }
+
+  if (/^\/(proteina|agua|creatina|plano|dieta|macros)\b/i.test(trimmed)) {
+    return await safeExecute(() => handleNutricao(trimmed, ctx), 'Nutrição (High-Protein)', 12000);
+  }
+
+  if (/^\/(compras?|tarefas?|carolina|lembrete|notas?|briefing)\b/i.test(trimmed)) {
+    return await safeExecute(() => handleGeral(trimmed, ctx), 'Pessoal & Família', 12000);
+  }
+
+  // 3. CHAT UNIVERSAL ESTILO GEMINI NORMAL / CHATGPT:
+  // Responde com inteligência total a qualquer conversa, dúvida, raciocínio, escrita ou problema!
+  let extraContext = '';
+  try {
+    const todayNutri = familyDb.getTodayNutrition();
+    const tasks = familyDb.getTasks().filter(t => !t.completed).length;
+    const shopping = familyDb.getShopping().filter(s => !s.completed).length;
+    extraContext = `Estado atual de André: ${todayNutri.totalProtein}g/160g de proteína hoje, ${todayNutri.totalWater}ml de água, ${tasks} tarefas pendentes, ${shopping} compras por fazer.`;
+  } catch {}
+
+  log.info('[Master] Conversa Gemini Universal', { text: trimmed.substring(0, 60), chatId });
+  return await safeExecute(() => askAgent({
+    chatId,
+    workerTag: 'master',
+    prompt: trimmed,
+    extraContext
+  }), 'Master Cockpit (Gemini AI)', 12000);
 }
 
 // ─── Instâncias Ativas de Bots ───────────────────────────────────────────────
