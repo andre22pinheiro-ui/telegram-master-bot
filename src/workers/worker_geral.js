@@ -4,6 +4,7 @@ import { familyDb } from '../shared/familyDb.js';
 import { createLogger } from '../utils/logger.js';
 import { askAgent } from '../services/reasoningService.js';
 import { searchLiveWeb } from '../shared/webSearch.js';
+import { getEmailBriefing, fetchRecentEmails, summarizeEmailWithAI, getEmailStatus } from '../services/emailService.js';
 
 const log = createLogger('WorkerGeral');
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
@@ -345,7 +346,7 @@ export async function handle(text, ctx = {}) {
   }
 
   if (/^\/(start|menu|ajuda)\b/i.test(trimmed)) {
-    return `🤖 *Assistente Familiar & Produtividade*\n\nComandos rápidos:\n\n🛒 \`/compras\` — Ver ou adicionar compras\n📋 \`/tarefas\` — Ver ou criar tarefas\n👧 \`/carolina\` — Escola, faltas e consultas\n📝 \`/nota Texto\` — Guardar nota rápida\n☀️ \`/briefing\` — Resumo geral do dia\n\n💡 *Conversa Aberta:* Fala livremente comigo sobre organização familiar, rotinas da Carolina ou planeamento do teu dia!`;
+    return `🤖 *Assistente Pessoal Executivo & Familiar*\n\nComandos rápidos:\n\n📧 \`/emails\` — Caixa de entrada & resumos por IA\n🔍 \`/pesquisa Texto\` — Pesquisar na Web ao vivo\n🛒 \`/compras\` — Ver ou adicionar compras\n📋 \`/tarefas\` — Ver ou criar tarefas\n🔔 \`/lembrete\` — Agendar alarmes e lembretes\n👧 \`/carolina\` — Escola, faltas e consultas\n📝 \`/nota Texto\` — Guardar nota rápida\n☀️ \`/briefing\` — Resumo geral do dia\n\n💡 *Conversa Aberta:* Fala livremente comigo sobre organização, emails, rotinas ou planeamento!`;
   }
 
   if (/^\/(briefing|resumo|dia)\b/i.test(trimmed)) return handleBriefing();
@@ -395,6 +396,41 @@ export async function handle(text, ctx = {}) {
     });
     txt += `━━━━━━━━━━━━━━━━━━━━━━━━`;
     return txt;
+  }
+
+  // ─── Assistente de Email & Resumos Executivos ─────────────────────────────
+  if (/^\/(emails?|correio|inbox)\b/i.test(trimmed)) {
+    return await getEmailBriefing(5);
+  }
+
+  if (/^\/(ler_email|resumo_email)\b/i.test(trimmed)) {
+    const numMatch = trimmed.match(/^\/(ler_email|resumo_email)\s*(\d*)/i);
+    const num = numMatch && numMatch[2] ? parseInt(numMatch[2], 10) : 1;
+    const { success, emails, error } = await fetchRecentEmails(10);
+    if (!success || !emails || emails.length === 0) {
+      return `❌ Não foi possível carregar os emails: ${error || 'Nenhum email disponível'}`;
+    }
+    const idx = Math.max(0, Math.min(num - 1, emails.length - 1));
+    const target = emails[idx];
+    const summary = await summarizeEmailWithAI(target);
+    return (
+      `📧 *Resumo Executivo do Email #${idx + 1}*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📩 *Assunto:* **${target.subject}**\n` +
+      `👤 *De:* _${target.from}_\n` +
+      `📅 *Data:* ${new Date(target.date).toLocaleString('pt-PT')}\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `${summary}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━`
+    );
+  }
+
+  if (/^\/email_status\b/i.test(trimmed)) {
+    const st = getEmailStatus();
+    if (!st.configured) {
+      return `📧 *Estado do Email:* ⚠️ Não configurado no .env.\nAdiciona \`EMAIL_USER\` e \`EMAIL_PASS\` para ativar.`;
+    }
+    return `📧 *Estado do Email:* 🟢 Conectado a \`${st.maskedEmail}\` via IMAP (${st.host}:${st.port})`;
   }
 
   if (/^\/(lembrete|lembretes)\b/i.test(trimmed)) {
