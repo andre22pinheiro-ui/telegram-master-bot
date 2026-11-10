@@ -9,6 +9,15 @@ const log = createLogger('IntentRouter');
  */
 const INTENT_PATTERNS = [
   {
+    intent: 'IMMO',
+    patterns: [
+      /^\/(immo|imovel|imóvel|avaliac[aã]o|avaliacao|radar|pesquisar_imoveis|relatorio_imoveis|sites_immo|alertas_immo)\b/i,
+      /\b(imov[eé]l|imóveis|imoveis|imobi[lh]i[aá]rio|avaliac[aã]o|avalia|m2|metro quadrado|amarante|casa|apartamento|terreno|moradia|habita[cç][aã]o|comprar\s+casa|vender\s+casa)\b/i,
+      /\b(rever\s+an[uú]ncios|an[uú]ncios\s+diariamente|pesquisas?\s+durante\s+o\s+dia|alertas?\s+de\s+im[oó]veis|relat[oó]rio\s+de\s+im[oó]veis|novos\s+im[oó]veis|radar\s+imobili[aá]rio)\b/i,
+      /\b(pesquisa-imobiliario|immoeval|cmvm)\b/i,
+    ],
+  },
+  {
     intent: 'DEV',
     patterns: [
       /^\/(criar_app|build|projetos?|github|vercel|deploy|code|codigo|app|api|script|instalar|npm|node)\b/i,
@@ -21,14 +30,7 @@ const INTENT_PATTERNS = [
     patterns: [
       /^\/(frotas?|rota|tac[oó]grafo|caminhão|pesado|condutor|km|quilómetros?)\b/i,
       /\b(frota|pesados?|caminhão|caminhões|tacógrafo|tac[oó]grafo|condutor|motorista|rota|trajeto|percurso|km|quilómetros?|gasoleo|gasolina|consumo)\b/i,
-      /\b(openroute|openrouteservice|ors)\b/i,
-    ],
-  },
-  {
-    intent: 'IMMO',
-    patterns: [
-      /^\/(immo|imovel|imóvel|avaliac[aã]o|m2|metro|amarante|casa|terreno|predio)\b/i,
-      /\b(imov[eé]l|imóvel|imobi[lh]i[aá]rio|avaliac[aã]o|avalia|preço|m2|metro quadrado|amarante|casa|apartamento|terreno|prédio|lote|moradia|hab[iy]tação|comprar|vender)\b/i,
+      /\b(openroute|openrouteservice|ors|rotabus)\b/i,
     ],
   },
   {
@@ -41,8 +43,8 @@ const INTENT_PATTERNS = [
   {
     intent: 'NUTRICAO',
     patterns: [
-      /^\/(nutricao|dieta|macros?|calorias?|proteina|agua|creatina|refeic[aã]o|refeicoes|receita|alimento)\b/i,
-      /\b(nutri[cç][aã]o|dieta|macros?|calorias?|prote[ií]na|creatina|refei[cç][aã]o|refei[cç][oõ]es|almo[cç]o|jantar|pequeno[- ]almo[cç]o|lanche|receita|shake|cottage|lombo|air[- ]?fryer)\b/i,
+      /^\/(nutricao|dieta|macros?|calorias?|proteina|agua|creatina|refeic[aã]o|refeicoes|receita|alimento|hoje|status)\b/i,
+      /\b(nutri[cç][aã]o|dieta|macros?|calorias?|prote[ií]na|creatina|refei[cç][aã]o|refei[cç][oõ]es|almo[cç]o|jantar|pequeno[- ]almo[cç]o|lanche|receita|shake|cottage|lombo|air[- ]?fryer|continente|pingo\s*doce|lidl|mercadona|auchan|comer)\b/i,
     ],
   },
   {
@@ -57,7 +59,7 @@ const INTENT_PATTERNS = [
 /**
  * Deteta a intenção de uma mensagem de texto.
  * @param {string} text - O texto da mensagem do utilizador.
- * @returns {'DEV'|'FROTAS'|'IMMO'|'GERAL'} A intenção detetada.
+ * @returns {'IMMO'|'DEV'|'FROTAS'|'TV'|'NUTRICAO'|'GERAL'} A intenção detetada.
  */
 export function detectIntent(text) {
   if (!text || typeof text !== 'string') return 'GERAL';
@@ -78,4 +80,3 @@ export function detectIntent(text) {
 }
 
 export default detectIntent;
-

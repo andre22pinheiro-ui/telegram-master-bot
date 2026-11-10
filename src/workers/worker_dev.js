@@ -7,24 +7,8 @@ import { askAgent } from '../services/reasoningService.js';
 const log = createLogger('WorkerDev');
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-async function askGemini(prompt) {
-  if (!GEMINI_API_KEY) return null;
-  try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
-    const res = await axios.post(url, {
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.4, maxOutputTokens: 1024 },
-    }, { timeout: 7000 });
-    return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
-  } catch (err) {
-    log.error('Gemini API falhou', err.message);
-    return null;
-  }
-}
+// ─── Helpers GitHub & Cloud ──────────────────────────────────────────────────
 
 async function listGithubRepos() {
   if (!GITHUB_TOKEN) return null;

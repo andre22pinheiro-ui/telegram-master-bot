@@ -3,9 +3,12 @@ import crypto from 'crypto';
 import axios from 'axios';
 import { readFileSync, existsSync } from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('GoogleDrive');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT_DIR = path.resolve(__dirname, '../../');
 
 // Configurações lidas do .env
 const GOOGLE_SA_KEY_RAW = process.env.GOOGLE_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_CREDENTIALS_JSON;
@@ -40,11 +43,12 @@ function getServiceAccountCredentials() {
     }
   }
 
-  // Verifica ficheiro padrão credentials.json ou service-account.json na raiz
+  // Verifica ficheiro padrão credentials.json ou service-account.json na raiz do projeto
   const defaultPaths = [
-    path.resolve('./google-credentials.json'),
-    path.resolve('./service-account.json'),
-    path.resolve('./credentials.json')
+    path.resolve(ROOT_DIR, 'service-account.json'),
+    path.resolve(ROOT_DIR, 'google-credentials.json'),
+    path.resolve(ROOT_DIR, 'credentials.json'),
+    path.resolve('./service-account.json')
   ];
 
   for (const p of defaultPaths) {

@@ -35,7 +35,17 @@ import {
   isDriveConfigured, 
   backupDatabaseToDrive 
 } from './src/services/googleDriveService.js';
-import { existsSync, readFileSync, mkdirSync } from 'fs';
+import { 
+  iniciarAgendadorRadar, 
+  executarVarreduraAmarante, 
+  gerarRelatorioDiarioMarkdown 
+} from './src/services/immoRadarService.js';
+import { 
+  formatarSitesImobiliariosMarkdown, 
+  buildImmoSitesKeyboard 
+} from './src/shared/immoSitesCatalog.js';
+import { getDailyNewsBriefing } from './src/services/newsService.js';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import path from 'path';
 
 const log = createLogger('Master');
@@ -97,7 +107,8 @@ function getMasterKeyboard() {
     ],
     [
       Markup.button.callback('💻 Dev & Repos', 'act_dev'),
-      Markup.button.callback('☀️ Briefing de Hoje', 'act_briefing')
+      Markup.button.callback('☀️ Briefing de Hoje', 'act_briefing'),
+      Markup.button.callback('🇪🇺 Notícias Europa & PT', 'act_noticias')
     ],
     [
       Markup.button.callback('🥗 Nutrição & Dieta', 'act_nutri_menu'),
@@ -132,7 +143,19 @@ async function sendReply(ctx, text, extra = null) {
   const chunks = splitText(text);
   for (let i = 0; i < chunks.length; i++) {
     const isLast = i === chunks.length - 1;
-    await ctx.replyWithMarkdown(chunks[i], isLast && extra ? extra : undefined);
+    const opts = isLast && extra ? extra : undefined;
+    try {
+      await ctx.replyWithMarkdown(chunks[i], opts);
+    } catch (mdErr) {
+      log.warn('Markdown parse falhou no Telegram, a enviar em texto simples:', mdErr?.message);
+      try {
+        const plainOpts = opts ? { ...opts } : {};
+        delete plainOpts.parse_mode;
+        await ctx.reply(chunks[i], plainOpts);
+      } catch (fallbackErr) {
+        log.error('Erro crítico ao enviar mensagem:', fallbackErr?.message);
+      }
+    }
   }
 }
 
@@ -151,6 +174,12 @@ async function processPhotoWithVision(ctx, botToken, contextTag = 'geral') {
     if (!downloaded || !downloaded.buffer) {
       return ctx.reply('❌ Não foi possível descarregar a imagem para análise.');
     }
+
+    try {
+      const filesDir = path.resolve('./data/ficheiros');
+      if (!existsSync(filesDir)) mkdirSync(filesDir, { recursive: true });
+      writeFileSync(path.join(filesDir, `${contextTag}_${Date.now()}.jpg`), downloaded.buffer);
+    } catch {}
 
     let cdnUrl = '';
     try {
@@ -189,7 +218,19 @@ async function rotear(ctx, text) {
     return await askAgent({ chatId, workerTag: 'master', prompt: '/reset' });
   }
 
-  // 2. Comandos Específicos com Barra (/)
+  // 2. Atalho Rápido para Status / Resumo Diário de Nutrição & Metas
+  if (/^(\/)?(status|hoje|resumo|macros|dieta_hoje)$/i.test(trimmed)) {
+    return getResumoHoje();
+  }
+
+  // 3. Notícias Factuais e Verificadas da Europa & Portugal (Fontes Oficiais RTP / Euronews)
+  if (/^(\/)?(noticias?|europa|portugal|news|briefing_noticias|noticias_europa)$/i.test(trimmed)) {
+    const briefing = await getDailyNewsBriefing();
+    await sendReply(ctx, briefing);
+    return null;
+  }
+
+  // 3. Comandos Específicos com Barra (/)
   if (/^\/(tv|canais|canal|iptv)\b/i.test(trimmed)) {
     if (/canal|canais/i.test(trimmed)) {
       const query = trimmed.replace(/.*(canal|canais)\s*/i, '').trim();
@@ -204,33 +245,58 @@ async function rotear(ctx, text) {
   }
 
   if (/^\/(rota|tacografo)\b/i.test(trimmed)) {
-    return await safeExecute(() => handleFrotas(trimmed, ctx), 'Frotas (RotaBus)', 12000);
+    return await safeExecute(() => handleFrotas(trimmed, ctx), 'Frotas (RotaBus)', 20000);
   }
 
   if (/^\/(projetos?|github|repos?|criar_app|apps?|catalogo|apks?)\b/i.test(trimmed)) {
-    return await safeExecute(() => handleDev(trimmed, ctx), 'Dev (Engenharia)', 12000);
+    return await safeExecute(() => handleDev(trimmed, ctx), 'Dev (Engenharia)', 20000);
   }
 
-  if (/^\/(avaliacao|avaliac[aã]o|immo|imovel)\b/i.test(trimmed)) {
-    return await safeExecute(() => handleImmo(trimmed, ctx), 'Immo (Avaliação)', 12000);
+  if (/^\/(avaliacao|avaliac[aã]o|immo|imovel|radar|relatorio_imoveis|relatorio|sites_immo|alertas_immo|pesquisar_imoveis)\b/i.test(trimmed)) {
+    return await safeExecute(() => handleImmo(trimmed, ctx), 'Immo (Avaliação & Radar)', 20000);
   }
 
   if (/^\/(proteina|agua|creatina|plano|dieta|macros)\b/i.test(trimmed)) {
-    return await safeExecute(() => handleNutricao(trimmed, ctx), 'Nutrição (High-Protein)', 12000);
+    return await safeExecute(() => handleNutricao(trimmed, ctx), 'Nutrição (High-Protein)', 20000);
   }
 
   if (/^\/(compras?|tarefas?|carolina|lembrete|notas?|briefing)\b/i.test(trimmed)) {
-    return await safeExecute(() => handleGeral(trimmed, ctx), 'Pessoal & Família', 12000);
+    return await safeExecute(() => handleGeral(trimmed, ctx), 'Pessoal & Família', 20000);
   }
 
-  // 3. CHAT UNIVERSAL ESTILO GEMINI NORMAL / CHATGPT:
+  // 4. Deteção Inteligente de Intenção em Linguagem Natural
+  const intent = detectIntent(trimmed);
+  if (intent === 'IMMO') {
+    log.info('[Master] Roteamento por intenção natural para IMMO', { text: trimmed.substring(0, 60) });
+    return await safeExecute(() => handleImmo(trimmed, ctx), 'Immo (Radar & Avaliação)', 20000);
+  }
+  if (intent === 'NUTRICAO') {
+    log.info('[Master] Roteamento por intenção natural para NUTRICAO', { text: trimmed.substring(0, 60) });
+    return await safeExecute(() => handleNutricao(trimmed, ctx), 'Nutrição (High-Protein)', 20000);
+  }
+  if (intent === 'FROTAS') {
+    log.info('[Master] Roteamento por intenção natural para FROTAS', { text: trimmed.substring(0, 60) });
+    return await safeExecute(() => handleFrotas(trimmed, ctx), 'Frotas (RotaBus)', 20000);
+  }
+  if (intent === 'DEV') {
+    log.info('[Master] Roteamento por intenção natural para DEV', { text: trimmed.substring(0, 60) });
+    return await safeExecute(() => handleDev(trimmed, ctx), 'Dev (Engenharia)', 20000);
+  }
+  if (intent === 'TV') {
+    log.info('[Master] Roteamento por intenção natural para TV', { text: trimmed.substring(0, 60) });
+    const cockpit = getTvCockpit();
+    await sendReply(ctx, cockpit.text, cockpit.keyboard);
+    return null;
+  }
+
+  // 5. CHAT UNIVERSAL ESTILO GEMINI NORMAL / CHATGPT:
   // Responde com inteligência total a qualquer conversa, dúvida, raciocínio, escrita ou problema!
   let extraContext = '';
   try {
     const todayNutri = familyDb.getTodayNutrition();
     const tasks = familyDb.getTasks().filter(t => !t.completed).length;
     const shopping = familyDb.getShopping().filter(s => !s.completed).length;
-    extraContext = `Estado atual de André: ${todayNutri.totalProtein}g/160g de proteína hoje, ${todayNutri.totalWater}ml de água, ${tasks} tarefas pendentes, ${shopping} compras por fazer.`;
+    extraContext = `Estado atual de André: ${todayNutri.totalProtein}g/160g de proteína hoje, ${todayNutri.totalWater}ml de água, ${tasks} tarefas pendentes, ${shopping} compras por fazer. Mini App Imobiliário Vercel: https://pesquisa-imobiliario.vercel.app`;
   } catch {}
 
   log.info('[Master] Conversa Gemini Universal', { text: trimmed.substring(0, 60), chatId });
@@ -239,7 +305,7 @@ async function rotear(ctx, text) {
     workerTag: 'master',
     prompt: trimmed,
     extraContext
-  }), 'Master Cockpit (Gemini AI)', 12000);
+  }), 'Master Cockpit (Gemini AI)', 20000);
 }
 
 // ─── Instâncias Ativas de Bots ───────────────────────────────────────────────
@@ -278,6 +344,14 @@ bot.start(async (ctx) => {
 
 bot.command(['menu', 'cockpit', 'painel'], async (ctx) => {
   await sendReply(ctx, `🎛️ *Menu Principal de Controlo:*`, getMasterKeyboard());
+});
+
+bot.command(['status', 'hoje', 'macros', 'resumo'], async (ctx) => {
+  await sendReply(ctx, getResumoHoje(), Markup.inlineKeyboard([
+    [Markup.button.callback('💧 +250ml Água', 'nutri_agua_250'), Markup.button.callback('💧 +500ml Água', 'nutri_agua_500')],
+    [Markup.button.callback('⚡ Creatina', 'nutri_creatina'), Markup.button.callback('🍗 +30g Prot', 'nutri_add_30')],
+    [Markup.button.callback('🥗 Ver Plano 160g', 'act_nutri_plano'), Markup.button.callback('🎛️ Cockpit', 'act_main_menu')]
+  ]));
 });
 
 bot.command(['tv', 'iptv', 'matchpro_tv', 'vlc'], async (ctx) => {
@@ -388,11 +462,42 @@ bot.command('projetos', async (ctx) => {
   await sendReply(ctx, resp);
 });
 
-bot.command('avaliacao', async (ctx) => {
+bot.command(['avaliacao', 'avaliar'], async (ctx) => {
   await ctx.sendChatAction('typing');
-  const resp = await safeExecute(() => handleImmo(ctx.message.text), 'ImmoEval', 8000);
+  const resp = await safeExecute(() => handleImmo(ctx.message.text, ctx), 'ImmoEval', 25000);
   await sendReply(ctx, resp, Markup.inlineKeyboard([
-    [Markup.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)]
+    [Markup.button.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)],
+    [Markup.button.callback('📡 Radar & Pesquisa', 'immo_radar_scan'), Markup.button.callback('📊 Relatório Diário', 'immo_daily_report')]
+  ]));
+});
+
+bot.command(['radar', 'pesquisar_imoveis', 'varredura'], async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const resp = await safeExecute(() => handleImmo('/radar', ctx), 'Radar Imobiliário', 25000);
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.button.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)],
+    [Markup.button.callback('📊 Relatório Diário', 'immo_daily_report'), Markup.button.callback('🌐 12 Portais & Sites', 'immo_sites')]
+  ]));
+});
+
+bot.command(['relatorio_imoveis', 'relatorio'], async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const resp = await safeExecute(() => handleImmo('/relatorio', ctx), 'Relatório Imobiliário', 25000);
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.button.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)],
+    [Markup.button.callback('📡 Radar Agora', 'immo_radar_scan'), Markup.button.callback('🌐 12 Portais & Sites', 'immo_sites')]
+  ]));
+});
+
+bot.command(['sites_immo', 'portais'], async (ctx) => {
+  await sendReply(ctx, formatarSitesImobiliariosMarkdown(), buildImmoSitesKeyboard());
+});
+
+bot.command(['alertas_immo', 'alertas'], async (ctx) => {
+  const resp = await handleImmo('/alertas', ctx);
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.button.callback('📡 Executar Varredura Agora', 'immo_radar_scan')],
+    [Markup.button.callback('🎛️ Voltar ao Cockpit', 'act_main_menu')]
   ]));
 });
 
@@ -403,6 +508,8 @@ bot.command('ajuda', async (ctx) => {
     `• \`/apps\` — Catálogo de todas as 9 aplicações\n` +
     `• \`/menu\` — Cockpit interativo com botões\n` +
     `• \`/apk\` — Download da app nativa RotaBus Android\n\n` +
+    `*🇪🇺 Notícias & Atualidade UE:*\n` +
+    `• \`/noticias\` — Briefing factual da Europa e Portugal (RTP / UE)\n\n` +
     `*🏡 Família & Pessoal:*\n` +
     `• \`/compras\` — Ver ou gerir lista de compras\n` +
     `• \`/tarefas\` — Tarefas domésticas pendentes\n` +
@@ -412,8 +519,12 @@ bot.command('ajuda', async (ctx) => {
     `*🚛 Frotas & RotaBus:*\n` +
     `• \`/rota ORIGEM para DESTINO\` — Rota otimizada para pesados\n` +
     `• \`/tacografo HORAS\` — Auditoria legal CE 561/2006\n\n` +
-    `*🏠 Imobiliário:*\n` +
-    `• \`/avaliacao ÁREA ZONA TIPOLOGIA ESTADO\` — Preço/m² e valor de mercado\n\n` +
+    `*🏠 Imobiliário & Radar:*\n` +
+    `• \`/radar\` — Disparar pesquisa de novos imóveis nos 12 portais\n` +
+    `• \`/relatorio\` — Resumo diário de anúncios novos e melhores oportunidades\n` +
+    `• \`/sites_immo\` — Ver os 12 portais e agências locais com links\n` +
+    `• \`/alertas_immo\` — Configuração das pesquisas e alertas ao longo do dia\n` +
+    `• \`/avaliacao ÁREA ZONA TIPOLOGIA ESTADO\` — Preço/m² e valor de mercado CMVM\n\n` +
     `*🖥️ Dev & Cloud:*\n` +
     `• \`/projetos\` — Repositórios recentes no GitHub\n` +
     `• \`/criar_app NOME\` — Scaffold de novo projeto`;
@@ -421,7 +532,25 @@ bot.command('ajuda', async (ctx) => {
   await sendReply(ctx, msg, getMasterKeyboard());
 });
 
+bot.command(['noticias', 'noticia', 'news', 'europa'], async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const briefing = await getDailyNewsBriefing();
+  await sendReply(ctx, briefing, Markup.inlineKeyboard([
+    [Markup.button.callback('🔄 Atualizar Notícias', 'act_noticias')],
+    [Markup.button.callback('🎛️ Menu Principal', 'act_main_menu')]
+  ]));
+});
+
 // Ações de Callback dos Botões Inline no Master
+bot.action('act_noticias', async (ctx) => {
+  await ctx.answerCbQuery('🇪🇺 A recolher notícias verificadas...');
+  await ctx.sendChatAction('typing');
+  const briefing = await getDailyNewsBriefing();
+  await sendReply(ctx, briefing, Markup.inlineKeyboard([
+    [Markup.button.callback('🔄 Atualizar Notícias', 'act_noticias')],
+    [Markup.button.callback('🎛️ Menu Principal', 'act_main_menu')]
+  ]));
+});
 bot.action('act_compras', async (ctx) => {
   await ctx.answerCbQuery();
   const resp = await handleGeral('/compras');
@@ -518,10 +647,47 @@ bot.action('act_frotas', async (ctx) => {
 
 bot.action('act_immo', async (ctx) => {
   await ctx.answerCbQuery();
-  const resp = await handleImmo('');
+  const resp = await handleImmo('/menu', ctx);
   await sendReply(ctx, resp, Markup.inlineKeyboard([
-    [Markup.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)],
-    [Markup.callback('📍 Amarante T3 (120m²)', 'immo_amarante'), Markup.callback('📍 Felgueiras T2 (85m²)', 'immo_felgueiras')]
+    [Markup.button.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)],
+    [Markup.button.callback('📡 Radar & Pesquisa Agora', 'immo_radar_scan'), Markup.button.callback('📊 Relatório Diário', 'immo_daily_report')],
+    [Markup.button.callback('🌐 12 Portais & Sites', 'immo_sites'), Markup.button.callback('🔔 Estado Alertas', 'immo_alertas_status')],
+    [Markup.button.callback('📍 Amarante T3 (120m²)', 'immo_amarante'), Markup.button.callback('📍 Felgueiras T2 (85m²)', 'immo_felgueiras')],
+    [Markup.button.callback('🎛️ Menu Principal', 'act_main_menu')]
+  ]));
+});
+
+bot.action('immo_radar_scan', async (ctx) => {
+  await ctx.answerCbQuery('A pesquisar novos anúncios nos 12 portais...');
+  await ctx.sendChatAction('typing');
+  const resp = await safeExecute(() => handleImmo('/radar', ctx), 'Radar Imobiliário', 25000);
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.button.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)],
+    [Markup.button.callback('📊 Relatório Diário', 'immo_daily_report'), Markup.button.callback('🌐 12 Portais & Sites', 'immo_sites')]
+  ]));
+});
+
+bot.action('immo_daily_report', async (ctx) => {
+  await ctx.answerCbQuery('A gerar relatório consolidado...');
+  await ctx.sendChatAction('typing');
+  const resp = await safeExecute(() => handleImmo('/relatorio', ctx), 'Relatório Diário', 25000);
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.button.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)],
+    [Markup.button.callback('📡 Radar Agora', 'immo_radar_scan'), Markup.button.callback('🌐 12 Portais', 'immo_sites')]
+  ]));
+});
+
+bot.action('immo_sites', async (ctx) => {
+  await ctx.answerCbQuery();
+  await sendReply(ctx, formatarSitesImobiliariosMarkdown(), buildImmoSitesKeyboard());
+});
+
+bot.action('immo_alertas_status', async (ctx) => {
+  await ctx.answerCbQuery();
+  const resp = await handleImmo('/alertas', ctx);
+  await sendReply(ctx, resp, Markup.inlineKeyboard([
+    [Markup.button.callback('📡 Executar Varredura Agora', 'immo_radar_scan')],
+    [Markup.button.callback('🎛️ Voltar ao Cockpit', 'act_main_menu')]
   ]));
 });
 
@@ -736,7 +902,7 @@ if (DEV_TOKEN && DEV_TOKEN.trim()) {
 
   botDev.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
-    const resp = await safeExecute(() => handleDev(ctx.message.text, ctx), 'Dev (Engenharia)', 12000);
+    const resp = await safeExecute(() => handleDev(ctx.message.text, ctx), 'Dev (Engenharia)', 20000);
     await sendReply(ctx, resp);
   });
 
@@ -818,7 +984,7 @@ if (FROTAS_TOKEN && FROTAS_TOKEN.trim()) {
 
   botFrotas.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
-    const resp = await safeExecute(() => handleFrotas(ctx.message.text, ctx), 'Frotas (RotaBus)', 12000);
+    const resp = await safeExecute(() => handleFrotas(ctx.message.text, ctx), 'Frotas (RotaBus)', 20000);
     await sendReply(ctx, resp);
   });
 
@@ -842,23 +1008,105 @@ if (IMMO_TOKEN && IMMO_TOKEN.trim()) {
   }).catch(() => {});
 
   botImmo.start(async (ctx) => {
-    await sendReply(ctx, `🏠 *Worker Imobiliário CMVM Ativo na Nuvem!*\n\nAvaliação imobiliária por m² para Amarante e Região Norte.\n\n• \`/avaliacao ÁREA ZONA TIPOLOGIA ESTADO\`\nEx: \`/avaliacao 120 Amarante T3 bom\``, Markup.inlineKeyboard([
+    await sendReply(ctx, 
+      `🏠 *Worker Imobiliário CMVM & Radar de Mercado Ativo!*\n\n` +
+      `Monitorização diária de novos anúncios em Amarante (12 portais) e avaliação pericial bancária CMVM.\n\n` +
+      `• \`/radar\` — Disparar pesquisa de novos imóveis agora\n` +
+      `• \`/relatorio\` — Relatório diário de anúncios e oportunidades\n` +
+      `• \`/sites\` — Diretório dos 12 portais e agências locais\n` +
+      `• \`/alertas\` — Configuração das pesquisas e alertas ao longo do dia\n` +
+      `• \`/avaliacao ÁREA ZONA TIPO ESTADO\` — Avaliação pericial CMVM\n\n` +
+      `_Toca abaixo para abrir a Mini App ou usar as ferramentas rápidas:_`,
+      Markup.inlineKeyboard([
+        [Markup.button.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)],
+        [Markup.button.callback('📡 Radar Agora', 'immo_radar_scan'), Markup.button.callback('📊 Relatório Diário', 'immo_daily_report')],
+        [Markup.button.callback('🌐 12 Portais & Sites', 'immo_sites'), Markup.button.callback('🔔 Estado Alertas', 'immo_alertas_status')],
+        [Markup.button.callback('📍 Amarante T3 (120m²)', 'immo_amarante'), Markup.button.callback('📍 Felgueiras T2 (85m²)', 'immo_felgueiras')]
+      ])
+    );
+  });
+
+  botImmo.command(['radar', 'pesquisa', 'pesquisar'], async (ctx) => {
+    await ctx.sendChatAction('typing');
+    const resp = await safeExecute(() => handleImmo('/radar', ctx), 'Immo Radar', 25000);
+    await sendReply(ctx, resp, Markup.inlineKeyboard([
       [Markup.button.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)],
-      [Markup.button.callback('📍 Amarante T3 (120m²)', 'immo_amarante'), Markup.button.callback('📍 Felgueiras T2 (85m²)', 'immo_felgueiras')]
+      [Markup.button.callback('📊 Relatório Diário', 'immo_daily_report'), Markup.button.callback('🌐 12 Portais', 'immo_sites')]
+    ]));
+  });
+
+  botImmo.command(['relatorio', 'relatorio_imoveis', 'resumo'], async (ctx) => {
+    await ctx.sendChatAction('typing');
+    const resp = await safeExecute(() => handleImmo('/relatorio', ctx), 'Immo Relatório', 25000);
+    await sendReply(ctx, resp, Markup.inlineKeyboard([
+      [Markup.button.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)],
+      [Markup.button.callback('📡 Pesquisar Mais Agora', 'immo_radar_scan')]
+    ]));
+  });
+
+  botImmo.command(['sites', 'portais'], async (ctx) => {
+    await sendReply(ctx, formatarSitesImobiliariosMarkdown(), buildImmoSitesKeyboard());
+  });
+
+  botImmo.command(['alertas', 'agenda'], async (ctx) => {
+    const resp = await handleImmo('/alertas', ctx);
+    await sendReply(ctx, resp, Markup.inlineKeyboard([
+      [Markup.button.callback('📡 Executar Varredura Agora', 'immo_radar_scan')]
+    ]));
+  });
+
+  botImmo.command('avaliacao', async (ctx) => {
+    await ctx.sendChatAction('typing');
+    const resp = await safeExecute(() => handleImmo(ctx.message.text, ctx), 'Immo Avaliação', 25000);
+    await sendReply(ctx, resp, Markup.inlineKeyboard([
+      [Markup.button.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)]
+    ]));
+  });
+
+  botImmo.action('immo_radar_scan', async (ctx) => {
+    await ctx.answerCbQuery('A pesquisar novos anúncios nos 12 portais...');
+    await ctx.sendChatAction('typing');
+    const resp = await safeExecute(() => handleImmo('/radar', ctx), 'Immo Radar', 25000);
+    await sendReply(ctx, resp, Markup.inlineKeyboard([
+      [Markup.button.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)],
+      [Markup.button.callback('📊 Relatório Diário', 'immo_daily_report'), Markup.button.callback('🌐 12 Portais & Sites', 'immo_sites')]
+    ]));
+  });
+
+  botImmo.action('immo_daily_report', async (ctx) => {
+    await ctx.answerCbQuery('A carregar relatório consolidado...');
+    await ctx.sendChatAction('typing');
+    const resp = await safeExecute(() => handleImmo('/relatorio', ctx), 'Immo Relatório', 25000);
+    await sendReply(ctx, resp, Markup.inlineKeyboard([
+      [Markup.button.webApp('🏠 Abrir ImmoEval Mini App', VERCEL_APPS.immo.url)],
+      [Markup.button.callback('📡 Radar Agora', 'immo_radar_scan')]
+    ]));
+  });
+
+  botImmo.action('immo_sites', async (ctx) => {
+    await ctx.answerCbQuery();
+    await sendReply(ctx, formatarSitesImobiliariosMarkdown(), buildImmoSitesKeyboard());
+  });
+
+  botImmo.action('immo_alertas_status', async (ctx) => {
+    await ctx.answerCbQuery();
+    const resp = await handleImmo('/alertas', ctx);
+    await sendReply(ctx, resp, Markup.inlineKeyboard([
+      [Markup.button.callback('📡 Executar Varredura Agora', 'immo_radar_scan')]
     ]));
   });
 
   botImmo.action('immo_amarante', async (ctx) => {
     await ctx.answerCbQuery();
     await ctx.sendChatAction('typing');
-    const resp = await handleImmo('/avaliacao 120 Amarante T3 bom');
+    const resp = await handleImmo('/avaliacao 120 Amarante T3 bom', ctx);
     await sendReply(ctx, resp);
   });
 
   botImmo.action('immo_felgueiras', async (ctx) => {
     await ctx.answerCbQuery();
     await ctx.sendChatAction('typing');
-    const resp = await handleImmo('/avaliacao 85 Felgueiras T2 bom');
+    const resp = await handleImmo('/avaliacao 85 Felgueiras T2 bom', ctx);
     await sendReply(ctx, resp);
   });
 
@@ -866,7 +1114,7 @@ if (IMMO_TOKEN && IMMO_TOKEN.trim()) {
 
   botImmo.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
-    const resp = await safeExecute(() => handleImmo(ctx.message.text, ctx), 'Immo (Avaliação)', 12000);
+    const resp = await safeExecute(() => handleImmo(ctx.message.text, ctx), 'Immo (Avaliação & Radar)', 25000);
     await sendReply(ctx, resp);
   });
 
@@ -941,7 +1189,7 @@ if (PESSOAL_TOKEN && PESSOAL_TOKEN.trim()) {
 
   botPessoal.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
-    const resp = await safeExecute(() => handleGeral(ctx.message.text, ctx), 'Pessoal & Família', 12000);
+    const resp = await safeExecute(() => handleGeral(ctx.message.text, ctx), 'Pessoal & Família', 20000);
     await sendReply(ctx, resp);
   });
 
@@ -1053,7 +1301,7 @@ if (NUTRICAO_TOKEN && NUTRICAO_TOKEN.trim()) {
 
   botNutri.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
-    const resp = await safeExecute(() => handleNutricao(ctx.message.text, ctx), 'Nutrição (High-Protein)', 12000);
+    const resp = await safeExecute(() => handleNutricao(ctx.message.text, ctx), 'Nutrição (High-Protein)', 20000);
     await sendReply(ctx, resp);
   });
 
@@ -1183,6 +1431,41 @@ function startAllBots() {
   log.info(`A arrancar ${botInstances.length} bots em paralelo com suporte completo a Mini Apps...`);
   for (const { name, bot: b } of botInstances) {
     launchSingleBot(name, b);
+  }
+
+  // Iniciar agendador de pesquisas e alertas diários de novos imóveis
+  try {
+    iniciarAgendadorRadar(bot);
+  } catch (err) {
+    log.error('Erro ao iniciar agendador de radar imobiliário:', err.message);
+  }
+
+  // Agendador Diário Matinal de Notícias da Europa e Portugal (08:00)
+  try {
+    let ultimoDiaEnviado = -1;
+    setInterval(async () => {
+      const agora = new Date();
+      const hoje = agora.getDate();
+      // Dispara às 08:00 uma vez por dia
+      if (agora.getHours() === 8 && agora.getMinutes() === 0 && ultimoDiaEnviado !== hoje) {
+        ultimoDiaEnviado = hoje;
+        if (CHAT_ID_AUTORIZADO) {
+          log.info('🇪🇺 A enviar Briefing Diário Matinal de Notícias da Europa e Portugal...');
+          try {
+            const briefing = await getDailyNewsBriefing(true);
+            await bot.telegram.sendMessage(CHAT_ID_AUTORIZADO, briefing, {
+              parse_mode: 'Markdown',
+              disable_web_page_preview: true
+            });
+          } catch (sendErr) {
+            log.error('Erro ao enviar briefing diário de notícias:', sendErr.message);
+          }
+        }
+      }
+    }, 30000); // verifica a cada 30 segundos
+    log.info('⏰ Agendador de Notícias Diárias (Europa & Portugal) ativado para as 08:00.');
+  } catch (err) {
+    log.error('Erro ao iniciar agendador de notícias:', err.message);
   }
 }
 

@@ -15,13 +15,14 @@ const log = createLogger('Resilience');
  */
 export async function withTimeout(
   promise,
-  ms = 8000,
-  customMsg = '⏱️ O serviço externo demorou mais de 8s a responder. A operação foi cancelada preventivamente para manter o bot rápido.'
+  ms = 15000,
+  customMsg = null
 ) {
   let timerId;
   const timeoutPromise = new Promise((_, reject) => {
     timerId = setTimeout(() => {
-      const err = new Error(customMsg);
+      const msg = customMsg || `⏱️ O serviço demorou mais de ${Math.round(ms / 1000)}s a responder. A operação foi cancelada preventivamente para manter o bot rápido.`;
+      const err = new Error(msg);
       err.name = 'TimeoutError';
       reject(err);
     }, ms);
@@ -42,13 +43,13 @@ export async function withTimeout(
  *
  * @param {() => Promise<string>} asyncFn - Função que executa a lógica do handler.
  * @param {string} workerName - Nome amigável do worker para registo de log.
- * @param {number} timeoutMs - Tempo limite preventivo (padrão: 8000ms).
+ * @param {number} timeoutMs - Tempo limite preventivo (padrão: 15000ms).
  * @returns {Promise<string>} Resposta pronta para envio ao Telegram.
  */
 export async function safeExecute(
   asyncFn,
   workerName = 'Worker',
-  timeoutMs = 8000
+  timeoutMs = 15000
 ) {
   try {
     return await withTimeout(asyncFn(), timeoutMs);

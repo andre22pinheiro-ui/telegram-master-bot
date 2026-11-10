@@ -2,8 +2,17 @@ node_modules/
 .env
 logs/
 data/geral_data.json
+data/conversas_historico.json
+data/imoveis_amarante.db
+data/ficheiros/
+data/*.db
+data/*.sqlite
+check_health.js
 *.log
 *.db-shm
 *.db-wal
 family.db
 .DS_Store
+service-account.json
+credentials.json
+google-credentials.json

@@ -165,16 +165,17 @@ async function handleBriefing() {
     briefing += `\n\n*Última nota Carolina:* ${ult.details} _(${ult.event_type})_`;
   }
 
-  if (GEMINI_API_KEY && (tarefasPendentes.length > 0 || comprasPendentes.length > 0)) {
+  if (tarefasPendentes.length > 0 || comprasPendentes.length > 0) {
     try {
       const contexto = `Tarefas: ${tarefasPendentes.map(t => t.title).join(', ')}`;
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
-      const res = await axios.post(url, {
-        contents: [{ parts: [{ text: `Dá uma frase curta motivacional e enérgica para um profissional que tem estas tarefas: ${contexto}` }] }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 80 }
-      }, { timeout: 6000 });
-      const dica = res.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-      if (dica) briefing += `\n\n💡 *Foco do dia:* ${dica}`;
+      const dica = await askAgent({
+        chatId: 'briefing_diario',
+        workerTag: 'pessoal',
+        prompt: `Dá uma frase executiva curta de 1 linha motivacional e pragmática (em português de Portugal) para foco nestas tarefas: ${contexto}`
+      });
+      if (dica && !dica.includes('⚠️')) {
+        briefing += `\n\n💡 *Foco Estratégico do Dia:* ${dica.trim()}`;
+      }
     } catch {}
   }
 

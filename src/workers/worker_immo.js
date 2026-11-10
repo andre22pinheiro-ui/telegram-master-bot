@@ -1,153 +1,210 @@
-// src/workers/worker_immo.js — Avaliação Imobiliária (Amarante + região)
-import axios from 'axios';
+// src/workers/worker_immo.js — Avaliação Imobiliária Normas CMVM & Radar de Anúncios Diários
 import { createLogger } from '../utils/logger.js';
 import { askAgent } from '../services/reasoningService.js';
+import { avaliarImovelCmvm, formatarAvaliacaoMarkdown } from '../services/immoCmvmService.js';
+import {
+  IMMO_SITES,
+  VERCEL_IMMO_APP,
+  formatarSitesImobiliariosMarkdown,
+  buildImmoSitesKeyboard
+} from '../shared/immoSitesCatalog.js';
+import {
+  gerarRelatorioDiarioMarkdown,
+  executarVarreduraAmarante,
+  obterOportunidades,
+  formatarAlertaNovoImovel,
+  listarImoveis
+} from '../services/immoRadarService.js';
 
 const log = createLogger('WorkerImmo');
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
-// ─── Base de preços por zona (€/m²) — Amarante e concelhos limítrofes ────────
-// Valores de referência (médias de mercado — atualizar periodicamente)
-const PRECOS_ZONA = {
-  'amarante centro': { min: 850, max: 1300, referencia: 'Centro histórico Amarante' },
-  'amarante': { min: 700, max: 1100, referencia: 'Concelho de Amarante (geral)' },
-  'fregim': { min: 600, max: 950, referencia: 'Fregim / Rebordelo' },
-  'bustelo': { min: 550, max: 900, referencia: 'Bustelo / Telões' },
-  'margaride': { min: 500, max: 850, referencia: 'Margaride (Felgueiras)' },
-  'felgueiras': { min: 500, max: 900, referencia: 'Felgueiras' },
-  'lousada': { min: 500, max: 900, referencia: 'Lousada' },
-  'penafiel': { min: 600, max: 1000, referencia: 'Penafiel' },
-  'marco canaveses': { min: 550, max: 900, referencia: 'Marco de Canaveses' },
-  'pacos ferreira': { min: 500, max: 850, referencia: 'Paços de Ferreira' },
-  'default': { min: 600, max: 1000, referencia: 'Região Norte de Portugal' },
-};
+// ─── Handlers Principais ─────────────────────────────────────────────────────
 
-function getPrecoZona(zona) {
-  const zonaLower = (zona || '').toLowerCase().trim()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  for (const [key, val] of Object.entries(PRECOS_ZONA)) {
-    if (zonaLower.includes(key.normalize('NFD').replace(/[\u0300-\u036f]/g, ''))) {
-      return { ...val, zona: key };
-    }
-  }
-  return { ...PRECOS_ZONA.default, zona: 'região' };
-}
-
-// ─── Helpers de Cálculo ──────────────────────────────────────────────────────
-
-function calcularAvaliacao(area, zona, estado = 'bom') {
-  const precos = getPrecoZona(zona);
-  let multiplicador = 1.0;
-
-  // Ajuste por estado do imóvel
-  switch (estado.toLowerCase()) {
-    case 'novo':       multiplicador = 1.3; break;
-    case 'excelente':  multiplicador = 1.2; break;
-    case 'bom':        multiplicador = 1.0; break;
-    case 'razoavel':
-    case 'razoável':   multiplicador = 0.85; break;
-    case 'mau':
-    case 'degradado':  multiplicador = 0.65; break;
-    default:           multiplicador = 1.0;
+/**
+ * Handler do comando /avaliacao com suporte a normas estritas CMVM
+ * Exemplo: /avaliacao 140 Amarante T3 bom 350 D
+ *          /avaliacao 110 Freixo T3 ruina 450 F sem_licenca
+ */
+function handleAvaliacaoComando(args = '') {
+  const trimmed = args.trim();
+  if (!trimmed) {
+    return (
+      `🏠 *AVALIAÇÃO IMOBILIÁRIA NORMAS CMVM (AMARANTE)*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `Formato flexível:\n` +
+      `\`/avaliacao ÁREA_ÚTIL ZONA TIPOLOGIA ESTADO [TERRENO] [CLASSE_ENERGÉTICA] [SEM_LICENCA]\`\n\n` +
+      `📌 *Exemplos Práticos:*\n` +
+      `• \`/avaliacao 135 "São Gonçalo" T3 bom 320 C\`\n` +
+      `• \`/avaliacao 150 Telões T4 excelente 650 D\`\n` +
+      `• \`/avaliacao 95 Lomba T3 ruina 780 F sem_licenca\`\n\n` +
+      `⚖️ *Normas Incorporadas da Mini App:*\n` +
+      `• U.F. Amarante Centro: 1.350 €/m² base\n` +
+      `• Coroa Periférica (Telões, Lomba, Freixo): 1.180 €/m²\n` +
+      `• Escalonamento de terreno: 35 €/m² (≤500m²) | 8 €/m² (≤2000m²) | 2 €/m²\n` +
+      `• Penalização por falta de licença de utilização (-25%)\n` +
+      `• Provisão de obras térmicas e eficiência energética\n\n` +
+      `🌐 _Calculadora Online:_ \`${VERCEL_IMMO_APP.url}\``
+    );
   }
 
-  const precoMin = Math.round(precos.min * multiplicador);
-  const precoMax = Math.round(precos.max * multiplicador);
-  const valorMin = Math.round(precoMin * area);
-  const valorMax = Math.round(precoMax * area);
-  const valorMedio = Math.round((valorMin + valorMax) / 2);
-
-  return { precoMin, precoMax, valorMin, valorMax, valorMedio, referencia: precos.referencia };
-}
-
-async function analiseGemini(area, zona, tipologia, estado) {
-  if (!GEMINI_API_KEY) return null;
-  const prompt = `És um especialista imobiliário português. Faz uma breve análise de mercado (máx. 150 palavras, em PT-PT) para:
-- Tipologia: ${tipologia}
-- Área: ${area} m²
-- Zona: ${zona}
-- Estado: ${estado}
-- Região de referência: Amarante e concelhos limítrofes (Norte de Portugal)
-Comenta tendências de mercado, valorização e conselho prático para comprador/vendedor.`;
-
-  try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`;
-    const res = await axios.post(url, {
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.5, maxOutputTokens: 300 },
-    }, { timeout: 15000 });
-    return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
-  } catch {
-    return null;
-  }
-}
-
-// ─── Handlers ────────────────────────────────────────────────────────────────
-
-async function handleAvaliacao(args) {
-  // Formato esperado: /avaliacao AREA ZONA [TIPOLOGIA] [ESTADO]
-  // Ex: /avaliacao 120 Amarante T3 bom
-  if (!args || args.trim().length === 0) {
-    return `🏠 *Avaliação Imobiliária*\n\nFormato:\n\`/avaliacao ÁREA ZONA TIPOLOGIA ESTADO\`\n\nExemplo:\n\`/avaliacao 120 Amarante T3 bom\`\n\nEstados: novo, excelente, bom, razoável, mau\nZonas suportadas: Amarante, Felgueiras, Penafiel, Marco Canaveses, Lousada...`;
-  }
-
-  const parts = args.trim().split(/\s+/);
-  const area = parseFloat(parts[0]);
-  if (isNaN(area) || area <= 0) return '❌ Área inválida. Ex: `/avaliacao 120 Amarante T3 bom`';
-
+  const parts = trimmed.split(/\s+/);
+  const areaUtil = parseFloat(parts[0]) || 100;
   const zona = parts[1] || 'Amarante';
   const tipologia = parts[2] || 'T3';
   const estado = parts[3] || 'bom';
+  const areaTerreno = parseFloat(parts[4]) || 0;
+  const classeEnergetica = parts[5] || 'D';
+  const semLicenca = /sem_licen|sem-licen|sem\s+licen/i.test(trimmed);
+  const isRuina = /ruina|ruína|restauro/i.test(estado) || /ruina|ruína/i.test(trimmed);
 
-  const avaliacao = calcularAvaliacao(area, zona, estado);
-  const analise = await analiseGemini(area, zona, tipologia, estado);
+  // Preço anunciado opcional se tiver número de 5 dígitos ou mais
+  const precoMatch = trimmed.match(/\b(\d{5,6})\b/);
+  const precoAnunciado = precoMatch ? parseFloat(precoMatch[1]) : 0;
 
-  let resposta = `🏠 *Avaliação Imobiliária*\n\n`;
-  resposta += `📍 Zona: ${zona} _(${avaliacao.referencia})_\n`;
-  resposta += `📐 Área: ${area} m² | Tipologia: ${tipologia} | Estado: ${estado}\n\n`;
-  resposta += `💰 *Preço/m²:* ${avaliacao.precoMin}€ — ${avaliacao.precoMax}€\n`;
-  resposta += `📊 *Valor estimado:*\n`;
-  resposta += `  • Mínimo: **${avaliacao.valorMin.toLocaleString('pt-PT')}€**\n`;
-  resposta += `  • Médio: **${avaliacao.valorMedio.toLocaleString('pt-PT')}€**\n`;
-  resposta += `  • Máximo: **${avaliacao.valorMax.toLocaleString('pt-PT')}€**\n`;
+  const resultado = avaliarImovelCmvm({
+    precoAnunciado,
+    areaUtil,
+    areaTerreno,
+    classeEnergetica,
+    zona,
+    semLicenca,
+    isRuina,
+    estado
+  });
 
-  if (analise) {
-    resposta += `\n🤖 *Análise de Mercado:*\n${analise}`;
+  return formatarAvaliacaoMarkdown(resultado);
+}
+
+/**
+ * Handler do Radar de Pesquisa Imediata
+ */
+async function handleRadarPesquisa() {
+  const { totalVarridos, novosDetetados } = await executarVarreduraAmarante();
+  let md = `📡 *RADAR DE MERCADO — VARREDURA CONCLUÍDA*\n`;
+  md += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  md += `🔍 *Portais e fontes pesquisadas:* 12 portais de referência em Amarante\n`;
+  md += `📋 *Anúncios processados:* ${totalVarridos}\n`;
+  md += `✨ *Novos imóveis detetados:* **${novosDetetados.length}**\n\n`;
+
+  if (novosDetetados.length > 0) {
+    md += `🚨 *NOVAS ENTRADAS ANALISADAS (NORMAS CMVM):*\n\n`;
+    novosDetetados.forEach((im, i) => {
+      const precoFmt = Number(im.preco).toLocaleString('pt-PT');
+      const cmvmFmt = Number(im.valor_cmvm).toLocaleString('pt-PT');
+      md += `*${i + 1}. ${im.titulo}*\n`;
+      md += `• Local: *${im.freguesia}* | Portal: *${im.portal}*\n`;
+      md += `• Preço Pedido: **${precoFmt} €** | Avaliação CMVM: **${cmvmFmt} €**\n`;
+      md += `• Veredito: *${im.classificacao}*\n`;
+      md += `• 🔗 [Ver Anúncio no Portal](${im.url})\n\n`;
+    });
+  } else {
+    md += `ℹ️ _Todos os imóveis ativos nos 12 portais já constam da tua base de dados. O radar permanece em escuta contínua e alertará assim que entrar uma nova moradia._\n\n`;
   }
 
-  return resposta;
+  md += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  md += `📱 _Podes consultar todos os filtros na Mini App:_ \`${VERCEL_IMMO_APP.url}\``;
+  return md;
 }
 
-function handleComandosPrincipais() {
-  return `🏠 *Assistente Imobiliário — Amarante e região*\n\nComandos disponíveis:\n\n\`/avaliacao ÁREA ZONA TIPOLOGIA ESTADO\`\n_Avalia um imóvel por m²_\n\nExemplo:\n\`/avaliacao 120 Amarante T3 bom\`\n\`/avaliacao 85 Felgueiras T2 razoável\`\n\`/avaliacao 200 "Amarante Centro" V4 novo\``;
+/**
+ * Menu principal interativo do Worker Imobiliário
+ */
+function handleMenuImmo() {
+  return (
+    `🏠 *BOT IMOBILIÁRIO AMARANTE & NORMAS CMVM*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `Sistema especializado de monitorização de mercado, radar de novos anúncios e avaliação bancária de moradias.\n\n` +
+    `🚀 *Comandos Disponíveis:*\n` +
+    `• \`/radar\` — Disparar pesquisa de novos imóveis agora mesmo nos 12 portais\n` +
+    `• \`/relatorio\` — Relatório diário de anúncios novos e melhores oportunidades\n` +
+    `• \`/avaliacao [área] [zona] [tipo] [estado]\` — Avaliação bancária rigorosa por m²\n` +
+    `• \`/sites\` — Ver os 12 portais e agências locais com links diretos\n` +
+    `• \`/alertas\` — Estado do radar automático durante o dia (08:30, 13:30, 18:30)\n\n` +
+    `💡 _Dica: Podes colar o link ou a descrição de qualquer moradia para eu calcular a viabilidade e o valor intrínseco CMVM!_\n\n` +
+    `🌐 *Mini App Oficial:* [ImmoEval Vercel](${VERCEL_IMMO_APP.url})`
+  );
 }
 
-// ─── Dispatcher ──────────────────────────────────────────────────────────────
+/**
+ * Informações e status do sistema de alertas diários
+ */
+function handleAlertasStatus() {
+  return (
+    `🔔 *ESTADO DOS ALERTAS DIÁRIOS & RADAR DE IMÓVEIS*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `🟢 *Status:* **ATIVO E OPERACIONAL**\n\n` +
+    `⏰ *Ciclo de Pesquisas Durante o Dia:*\n` +
+    `• **08:30** — ☀️ Relatório Matinal com novas entradas das últimas 24h\n` +
+    `• **13:30** — 🔍 Varredura de almoço nos portais (RE/MAX, ERA, Idealista, etc.)\n` +
+    `• **18:30** — 🌆 Varredura de final de tarde e consolidação de oportunidades\n` +
+    `• **A cada 4 horas** — Verificação em background para alertas imediatos\n\n` +
+    `🎯 *Critérios de Alerta:* Moradias em Amarante (São Gonçalo, Cepelos, Telões, Fregim, Lomba, Madalena, Gatão, Freixo), com teto de referência até 250.000 € (ou 300.000 € negociáveis).\n\n` +
+    `_Podes forçar uma pesquisa a qualquer segundo escrevendo \`/radar\`._`
+  );
+}
 
-export async function handle(text, ctx = {}) {
+// ─── Dispatcher Principal ────────────────────────────────────────────────────
+
+export async function handle(text = '', ctx = {}) {
   const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
-  log.info('Processando pedido IMMO', { text: text.substring(0, 60), chatId });
   const trimmed = text.trim();
+  log.info('Processando pedido IMMO', { text: trimmed.substring(0, 60), chatId });
 
   if (/^\/(reset|limpar)\b/i.test(trimmed)) {
     return await askAgent({ chatId, workerTag: 'immo', prompt: '/reset' });
   }
 
-  if (/^\/(avaliacao|avaliac[aã]o|immo|imovel)\s+/i.test(trimmed)) {
-    return handleAvaliacao(trimmed.replace(/^\/(avaliacao|avaliac[aã]o|immo|imovel)\s+/i, ''));
+  // 1. Radar e Pesquisa Imediata
+  if (/^\/(radar|pesquisar|pesquisa|pesquisar_imoveis|varredura)\b/i.test(trimmed)) {
+    return await handleRadarPesquisa();
   }
 
-  if (/^\/(start|menu|ajuda)\b/i.test(trimmed)) {
-    return handleComandosPrincipais();
+  // 2. Relatório Diário de Imóveis
+  if (/^\/(relatorio|relat[oó]rio|relatorio_imoveis|resumo_imoveis|imoveis_novos|novos)\b/i.test(trimmed)) {
+    return gerarRelatorioDiarioMarkdown();
   }
 
-  // Diálogo e resolução de problemas imobiliários complexos (yield, impostos, viabilidade)
+  // 3. Diretório de Sites e Portais
+  if (/^\/(sites|sites_immo|portais|imobiliarias|agencias)\b/i.test(trimmed)) {
+    return formatarSitesImobiliariosMarkdown();
+  }
+
+  // 4. Estado de Alertas Diários
+  if (/^\/(alertas|alertas_immo|agenda_immo)\b/i.test(trimmed)) {
+    return handleAlertasStatus();
+  }
+
+  // 5. Avaliação CMVM com argumentos
+  if (/^\/(avaliacao|avaliac[aã]o|immo|imovel|avaliar)\s+/i.test(trimmed)) {
+    const args = trimmed.replace(/^\/(avaliacao|avaliac[aã]o|immo|imovel|avaliar)\s+/i, '');
+    return handleAvaliacaoComando(args);
+  }
+
+  // 6. Menu e Ajuda
+  if (/^\/(start|menu|ajuda|immo|imobiliario)\b/i.test(trimmed)) {
+    return handleMenuImmo();
+  }
+
+  // 7. Deteção de pedido de rever anúncios diariamente / pesquisa de imóveis
+  if (/rever\s+an[uú]ncios|an[uú]ncios\s+diariamente|pesquisas?\s+durante\s+o\s+dia|alertas?\s+e\s+relat[oó]rio|im[oó]veis\s+novos/i.test(trimmed)) {
+    let resposta = `✅ *CAPACITAÇÃO DE PESQUISA & ALERTAS ATIVADA COM SUCESSO!*\n\n`;
+    resposta += `O bot de imobiliário foi totalmente integrado com a tua **Mini App Vercel** (\`${VERCEL_IMMO_APP.url}\`) e as normas periciais CMVM.\n\n`;
+    resposta += `🔔 *Automação configurada para o teu Telegram:*\n`;
+    resposta += `1. **Pesquisas ao Longo do Dia:** Varredura automática a cada 4 horas (08:30, 13:30, 18:30) nos 12 portais (Casa Yes, ERA, RE/MAX, Idealista, Imovirtual, Moramarante, etc.).\n`;
+    resposta += `2. **Alertas Imediatos:** Sempre que uma moradia nova é publicada, recebes um alerta individual com o preço pedido vs a avaliação CMVM.\n`;
+    resposta += `3. **Relatório Diário:** Resumo consolidado matinal às 08:30 com todas as oportunidades.\n\n`;
+    resposta += `Aqui está o relatório do estado atual do mercado:\n\n`;
+    resposta += gerarRelatorioDiarioMarkdown();
+    return resposta;
+  }
+
+  // 8. Diálogo Avançado com Inteligência Artificial Especialista em Imobiliário
   return await askAgent({
     chatId,
     workerTag: 'immo',
-    prompt: trimmed
+    prompt: trimmed,
+    extraContext: `Estás integrado com a app Vercel https://pesquisa-imobiliario.vercel.app. Conheces os 12 portais de Amarante e aplicas sempre as normas de peritagem CMVM (1.350€/m² centro urbano, 1.180€/m² periferia, terreno escalonado 35€/8€/2€, e penalização de 25% se não tiver licença de utilização). Teto de investimento: 250.000€.`
   });
 }
 
 export default { handle };
-

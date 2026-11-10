@@ -165,32 +165,12 @@ export function handleCreatina() {
 // ─── Análise com IA (Gemini) ou Sugestão de Receita ──────────────────────────
 
 export async function handleAnaliseIa(text) {
-  if (!GEMINI_API_KEY) {
-    return (
-      `🥩 *Sugestão Rápida de Refeição:*
-• Bife de frango ou lombo de porco (200g) = ~45g Proteína
-• 3 Ovos inteiros + 2 claras = ~26g Proteína
-• 1 Lata de Atum natural = ~30g Proteína
-• 200g Queijo Cottage Milbona = ~28g Proteína`
-    );
-  }
-
   try {
-    const prompt =
-      `És um nutricionista desportivo de elite português focado em hipertrofia, energia e alta proteína (meta diária 160g de proteína). ` +
-      `Responde em português de Portugal de forma concisa, encorajadora e estruturada com bullet points e estimativa de macros (Proteína, Hidratos, Gordura, Kcal) para o seguinte pedido:\n\n"${text}"`;
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-    const res = await axios.post(
-      url,
-      {
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.6, maxOutputTokens: 600 }
-      },
-      { timeout: 7500 }
-    );
-
-    const reply = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const reply = await askAgent({
+      chatId: 'nutri_analise',
+      workerTag: 'nutricao',
+      prompt: `Analisa este pedido nutricional e responde de forma concisa, factual e estruturada com bullet points e cálculo exato de macros (Proteína, Hidratos, Gordura, Kcal):\n\n${text}`
+    });
     return reply || '⚠️ Não consegui gerar a resposta nutricional neste momento.';
   } catch (err) {
     log.error('Erro na IA Nutrição:', err?.message || err);
