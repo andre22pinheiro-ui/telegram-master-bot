@@ -628,6 +628,12 @@ bot.command(['diagnostico', 'status_nuvem', 'status'], async (ctx) => {
   }
 
   const autorizadosList = listAuthorized();
+  const isPcOnline = pcRemoteBridge.isPcOnline();
+  const pcInfo = pcRemoteBridge.getPcInfo();
+  const pcStatusLine = isPcOnline 
+    ? `🟢 Conectado (${pcInfo?.hostname || 'Surface'})` 
+    : `⚪ Offline / Standby`;
+  const pendingReminders = (familyDb.getReminders() || []).filter(r => !r.sent).length;
 
   const msg =
     `📊 *Cockpit de Diagnóstico Operacional na Nuvem*\n` +
@@ -636,6 +642,8 @@ bot.command(['diagnostico', 'status_nuvem', 'status'], async (ctx) => {
     `💾 *Memória RAM:* ${ramMb} MB / 512 MB (Plano Cloud)\n` +
     `📡 *Webhooks Telegram:* 6/6 Bots Ativos (Push 24/7)\n` +
     `☁️ *Base de Dados Google Drive:* Ativo & Sincronizado\n` +
+    `💻 *Ponte PC Surface:* ${pcStatusLine}\n` +
+    `🔔 *Lembretes Proativos:* ${pendingReminders} agendados\n` +
     `🎙️ *Voz & Áudio:* Groq Whisper LPU Ativo\n` +
     `🤖 *IA Primária (Groq LPU):* ${groqStatus}\n` +
     `🔒 *Segurança:* Restrito aos números 919115655 e 933276221\n` +
