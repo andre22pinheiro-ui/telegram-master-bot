@@ -22,6 +22,7 @@ import { VERCEL_APPS, buildTelegramAppsKeyboard, formatAllVercelAppsMarkdown } f
 import { handleFamilyApi } from './src/shared/familyRoutes.js';
 import { analyzeImageBuffer, downloadTelegramPhoto } from './src/shared/multimodalVision.js';
 import { uploadToCloudinary } from './src/shared/cloudinaryCdn.js';
+import { transcribeTelegramAudio } from './src/shared/whisperAudio.js';
 import { safeExecute } from './src/utils/resilience.js';
 import { 
   authMiddleware, 
@@ -874,7 +875,28 @@ bot.on('text', async (ctx) => {
 
 bot.on('sticker', (ctx) => ctx.reply('😄 Sticker recebido! Fala comigo em texto ou toca no menu de Mini Apps.'));
 bot.on('photo', (ctx) => processPhotoWithVision(ctx, TOKEN, 'master'));
-bot.on('voice', (ctx) => ctx.reply('🎙️ Mensagem de voz recebida!'));
+const handleMasterVoice = async (ctx) => {
+  try {
+    await ctx.sendChatAction('typing');
+    const result = await transcribeTelegramAudio(ctx);
+    if (!result || !result.text) {
+      await ctx.reply('🎙️ Não foi possível reconhecer o áudio. Tenta falar um pouco mais perto ou envia mensagem de texto.');
+      return;
+    }
+    await ctx.reply(`🎙️ _"${result.text}"_`, { parse_mode: 'Markdown' }).catch(() => {});
+    await ctx.sendChatAction('typing');
+    const resposta = await rotear(ctx, result.text);
+    if (resposta) {
+      await sendReply(ctx, resposta);
+    }
+  } catch (err) {
+    log.error('Erro ao processar mensagem de voz no Master:', err.message);
+    await ctx.reply('⚠️ Ocorreu um erro ao processar a tua mensagem de voz.');
+  }
+};
+
+bot.on('voice', handleMasterVoice);
+bot.on('audio', handleMasterVoice);
 
 bot.catch((err, ctx) => {
   log.error('Erro não tratado no Master Bot', err?.message || err);
@@ -941,6 +963,21 @@ if (DEV_TOKEN && DEV_TOKEN.trim()) {
     await ctx.sendChatAction('typing');
     const resp = await safeExecute(() => handleDev(ctx.message.text, ctx), 'Dev (Engenharia)', 20000);
     await sendReply(ctx, resp);
+  });
+
+  botDev.on(['voice', 'audio'], async (ctx) => {
+    try {
+      await ctx.sendChatAction('typing');
+      const result = await transcribeTelegramAudio(ctx);
+      if (result?.text) {
+        await ctx.reply(`🎙️ _"${result.text}"_`, { parse_mode: 'Markdown' }).catch(() => {});
+        await ctx.sendChatAction('typing');
+        const resp = await safeExecute(() => handleDev(result.text, ctx), 'Dev (Áudio)', 30000);
+        await sendReply(ctx, resp);
+      }
+    } catch (err) {
+      log.error('Erro ao processar voz no Dev:', err.message);
+    }
   });
 
   botDev.catch((err) => log.error('Erro no Worker Dev', err?.message || err));
@@ -1023,6 +1060,21 @@ if (FROTAS_TOKEN && FROTAS_TOKEN.trim()) {
     await ctx.sendChatAction('typing');
     const resp = await safeExecute(() => handleFrotas(ctx.message.text, ctx), 'Frotas (RotaBus)', 20000);
     await sendReply(ctx, resp);
+  });
+
+  botFrotas.on(['voice', 'audio'], async (ctx) => {
+    try {
+      await ctx.sendChatAction('typing');
+      const result = await transcribeTelegramAudio(ctx);
+      if (result?.text) {
+        await ctx.reply(`🎙️ _"${result.text}"_`, { parse_mode: 'Markdown' }).catch(() => {});
+        await ctx.sendChatAction('typing');
+        const resp = await safeExecute(() => handleFrotas(result.text, ctx), 'Frotas (Áudio)', 20000);
+        await sendReply(ctx, resp);
+      }
+    } catch (err) {
+      log.error('Erro ao processar voz no Frotas:', err.message);
+    }
   });
 
   botFrotas.catch((err) => log.error('Erro no Worker Frotas', err?.message || err));
@@ -1155,6 +1207,21 @@ if (IMMO_TOKEN && IMMO_TOKEN.trim()) {
     await sendReply(ctx, resp);
   });
 
+  botImmo.on(['voice', 'audio'], async (ctx) => {
+    try {
+      await ctx.sendChatAction('typing');
+      const result = await transcribeTelegramAudio(ctx);
+      if (result?.text) {
+        await ctx.reply(`🎙️ _"${result.text}"_`, { parse_mode: 'Markdown' }).catch(() => {});
+        await ctx.sendChatAction('typing');
+        const resp = await safeExecute(() => handleImmo(result.text, ctx), 'Immo (Áudio)', 25000);
+        await sendReply(ctx, resp);
+      }
+    } catch (err) {
+      log.error('Erro ao processar voz no Immo:', err.message);
+    }
+  });
+
   botImmo.catch((err) => log.error('Erro no Worker Immo', err?.message || err));
   botInstances.push({ name: 'Immo (@ppspppBot)', bot: botImmo, key: 'immo' });
 }
@@ -1228,6 +1295,21 @@ if (PESSOAL_TOKEN && PESSOAL_TOKEN.trim()) {
     await ctx.sendChatAction('typing');
     const resp = await safeExecute(() => handleGeral(ctx.message.text, ctx), 'Pessoal & Família', 20000);
     await sendReply(ctx, resp);
+  });
+
+  botPessoal.on(['voice', 'audio'], async (ctx) => {
+    try {
+      await ctx.sendChatAction('typing');
+      const result = await transcribeTelegramAudio(ctx);
+      if (result?.text) {
+        await ctx.reply(`🎙️ _"${result.text}"_`, { parse_mode: 'Markdown' }).catch(() => {});
+        await ctx.sendChatAction('typing');
+        const resp = await safeExecute(() => handleGeral(result.text, ctx), 'Pessoal (Áudio)', 20000);
+        await sendReply(ctx, resp);
+      }
+    } catch (err) {
+      log.error('Erro ao processar voz no Pessoal:', err.message);
+    }
   });
 
   botPessoal.catch((err) => log.error('Erro no Worker Pessoal', err?.message || err));
@@ -1340,6 +1422,21 @@ if (NUTRICAO_TOKEN && NUTRICAO_TOKEN.trim()) {
     await ctx.sendChatAction('typing');
     const resp = await safeExecute(() => handleNutricao(ctx.message.text, ctx), 'Nutrição (High-Protein)', 20000);
     await sendReply(ctx, resp);
+  });
+
+  botNutri.on(['voice', 'audio'], async (ctx) => {
+    try {
+      await ctx.sendChatAction('typing');
+      const result = await transcribeTelegramAudio(ctx);
+      if (result?.text) {
+        await ctx.reply(`🎙️ _"${result.text}"_`, { parse_mode: 'Markdown' }).catch(() => {});
+        await ctx.sendChatAction('typing');
+        const resp = await safeExecute(() => handleNutricao(result.text, ctx), 'Nutrição (Áudio)', 20000);
+        await sendReply(ctx, resp);
+      }
+    } catch (err) {
+      log.error('Erro ao processar voz na Nutrição:', err.message);
+    }
   });
 
   botNutri.catch((err) => log.error('Erro no Worker Nutrição', err?.message || err));

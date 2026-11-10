@@ -302,6 +302,12 @@ export async function syncAllToDrive(folderId = DEFAULT_DRIVE_FOLDER_ID) {
   for (const item of CRITICAL_FILES) {
     const localPath = path.resolve(ROOT_DIR, item.path);
     if (existsSync(localPath)) {
+      if (item.name === 'imoveis_amarante.db') {
+        try {
+          const { checkpointImmoDb } = await import('./immoRadarService.js');
+          checkpointImmoDb?.();
+        } catch (_) {}
+      }
       const res = await uploadOrUpdateFileInDrive({
         filePath: localPath,
         fileName: item.name,
@@ -313,6 +319,30 @@ export async function syncAllToDrive(folderId = DEFAULT_DRIVE_FOLDER_ID) {
 
   log.info(`✅ Sincronização para o Google Drive terminada (${synced}/${CRITICAL_FILES.length} sincronizados).`);
   return synced > 0;
+}
+
+let debouncedSyncTimer = null;
+
+/**
+ * Dispara uma sincronização para o Google Drive com debounce (ex: 20s após a última alteração).
+ * Evita chamadas repetidas e garante persistência rápida após qualquer escrita.
+ */
+export function triggerDebouncedDriveSync(delayMs = 20000, folderId = DEFAULT_DRIVE_FOLDER_ID) {
+  if (!isDriveConfigured()) return;
+  if (debouncedSyncTimer) {
+    clearTimeout(debouncedSyncTimer);
+  }
+  log.info(`⏳ Sincronização orientada a eventos no Drive agendada para daqui a ${delayMs / 1000}s.`);
+  debouncedSyncTimer = setTimeout(async () => {
+    try {
+      log.info('🚀 A executar sincronização agendada por eventos no Google Drive...');
+      await syncAllToDrive(folderId);
+    } catch (err) {
+      log.error('Erro na sincronização orientada a eventos:', err.message);
+    } finally {
+      debouncedSyncTimer = null;
+    }
+  }, delayMs);
 }
 
 /**

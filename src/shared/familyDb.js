@@ -50,6 +50,10 @@ function saveStore(data) {
     writeFileSync(tmpFile, JSON.stringify(data, null, 2), 'utf8');
     renameSync(tmpFile, DB_FILE);
     memoryCache = data;
+    // Sincronizar quase em tempo real para o Google Drive
+    import('../services/googleDriveService.js')
+      .then(m => m.triggerDebouncedDriveSync?.(15000))
+      .catch(() => {});
     return true;
   } catch (err) {
     console.error('[familyDb] Erro ao gravar dados atomicamente:', err);

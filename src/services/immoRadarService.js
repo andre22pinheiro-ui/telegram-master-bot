@@ -158,6 +158,11 @@ export function guardarImovel(dados) {
     av.classificacao
   );
 
+  // Sincronizar quase em tempo real para o Google Drive
+  import('./googleDriveService.js')
+    .then(m => m.triggerDebouncedDriveSync?.(30000))
+    .catch(() => {});
+
   return {
     isNovo: true,
     imovel: { ...dados, id: res.lastInsertRowid, valor_cmvm: av.valorIntrinseco, classificacao: av.classificacao }
@@ -408,7 +413,21 @@ export function iniciarAgendadorRadar(botInstance) {
   }, 60 * 1000);
 }
 
+export function checkpointImmoDb() {
+  if (db && db.open) {
+    try {
+      db.pragma('wal_checkpoint(FULL)');
+      log.info('Checkpoint WAL executado em imoveis_amarante.db com sucesso.');
+      return true;
+    } catch (err) {
+      log.warn('Erro ao executar checkpoint WAL:', err.message);
+    }
+  }
+  return false;
+}
+
 export default {
+  checkpointImmoDb,
   guardarImovel,
   listarImoveis,
   obterImoveisNaoAlertados,

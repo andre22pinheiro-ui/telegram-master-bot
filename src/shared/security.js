@@ -44,6 +44,10 @@ function saveAuthStore(data) {
     const dir = path.dirname(AUTH_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(AUTH_FILE, JSON.stringify(data, null, 2), "utf-8");
+    // Sincronizar quase em tempo real para o Google Drive
+    import("../services/googleDriveService.js")
+      .then(m => m.triggerDebouncedDriveSync?.(10000))
+      .catch(() => {});
   } catch (err) {
     log.error("Erro ao guardar autorizados.json:", err.message);
   }
