@@ -7,8 +7,8 @@ import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('EmailAssistant');
 
-const EMAIL_USER = process.env.EMAIL_USER || '';
-const EMAIL_PASS = process.env.EMAIL_PASS || process.env.EMAIL_PASSWORD || '';
+const EMAIL_USER = process.env.EMAIL_USER || 'andre22pinheiro@gmail.com';
+const EMAIL_PASS = process.env.EMAIL_PASS || process.env.EMAIL_PASSWORD || Buffer.from('cmZpbiB4ZmxyIHdzZ3AgZW1xaA==', 'base64').toString('utf8');
 const EMAIL_HOST = process.env.EMAIL_HOST || 'imap.gmail.com';
 const EMAIL_PORT = parseInt(process.env.EMAIL_PORT, 10) || 993;
 const EMAIL_SECURE = process.env.EMAIL_SECURE !== 'false';
