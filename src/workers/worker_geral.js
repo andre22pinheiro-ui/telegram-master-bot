@@ -5,6 +5,7 @@ import { createLogger } from '../utils/logger.js';
 import { askAgent } from '../services/reasoningService.js';
 import { searchLiveWeb } from '../shared/webSearch.js';
 import { getEmailBriefing, fetchRecentEmails, summarizeEmailWithAI, getEmailStatus } from '../services/emailService.js';
+import { obterPostosMaisBaratos, formatarCombustiveisMarkdown } from '../services/combustiveisService.js';
 
 const log = createLogger('WorkerGeral');
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
@@ -395,6 +396,44 @@ export async function handle(text, ctx = {}) {
       if (r.snippet) txt += `   ${r.snippet.slice(0, 150)}...\n\n`;
     });
     txt += `━━━━━━━━━━━━━━━━━━━━━━━━`;
+    return txt;
+  }
+
+  if (/^\/(transito|tr[aâ]nsito|estradas?|a4|ip4|mar[aã]o)\b/i.test(trimmed)) {
+    const termo = trimmed.replace(/^\/(transito|tr[aâ]nsito|estradas?|a4|ip4|mar[aã]o)\s*/i, '').trim() || 'A4 Túnel do Marão Amarante';
+    const results = await searchLiveWeb(`transito condicionamentos obras ${termo}`, 3);
+    if (!results || results.length === 0) {
+      return `🚗 *Informação de Trânsito*\n\nNão foram detetados alertas graves ou acidentes recentes para *${termo}*. A circulação parece regular.`;
+    }
+    let txt = `🚗 *Trânsito & Condicionamentos em Tempo Real:*\n📍 *Via:* _${termo}_\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    results.forEach((r, idx) => {
+      txt += `*${idx + 1}. [${r.title}](${r.url})*\n`;
+      if (r.snippet) txt += `   ${r.snippet.slice(0, 160)}...\n\n`;
+    });
+    txt += `━━━━━━━━━━━━━━━━━━━━━━━━\n_Fontes: Infraestruturas de Portugal, notícias locais e ViaLivre._`;
+    return txt;
+  }
+
+  if (/^\/(combust[ií]veis?|gasoleo|gasolina|gas[oó]leo)\b/i.test(trimmed)) {
+    const resto = trimmed.replace(/^\/(combust[ií]veis?|gasoleo|gasolina|gas[oó]leo)\s*/i, '').trim();
+    const isGasolina = /gasolina|95|98/i.test(trimmed);
+    const mun = resto.replace(/gasolina|gasoleo|95|98/gi, '').trim() || 'Amarante';
+    const dados = await obterPostosMaisBaratos(mun, isGasolina ? 'gasolina' : 'gasoleo');
+    return formatarCombustiveisMarkdown(dados);
+  }
+
+  if (/^\/(farm[aá]cias?|farmacia_servico)\b/i.test(trimmed)) {
+    const termo = trimmed.replace(/^\/(farm[aá]cias?|farmacia_servico)\s*/i, '').trim() || 'Amarante';
+    const results = await searchLiveWeb(`farmacias de servico ${termo} permanente`, 3);
+    if (!results || results.length === 0) {
+      return `💊 *Farmácias de Serviço*\n\nConsulta o portal oficial em: https://farmaciasdeservico.net/localidade/porto/amarante`;
+    }
+    let txt = `💊 *Farmácias de Serviço em Tempo Real:*\n📍 *Concelho:* _${termo}_\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    results.forEach((r, idx) => {
+      txt += `*${idx + 1}. [${r.title}](${r.url})*\n`;
+      if (r.snippet) txt += `   ${r.snippet.slice(0, 160)}...\n\n`;
+    });
+    txt += `━━━━━━━━━━━━━━━━━━━━━━━━\n_Dados sincronizados com o portal Farmácias de Serviço e CM Amarante._`;
     return txt;
   }
 

@@ -12,7 +12,8 @@ export async function searchLiveWeb(query, maxResults = 5) {
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(clean)}`;
     const res = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'pt-PT,pt;q=0.9,en;q=0.8'
       }
     });
@@ -20,13 +21,14 @@ export async function searchLiveWeb(query, maxResults = 5) {
     if (!res.ok) return [];
     const text = await res.text();
 
-    const items = [];
-    const resultBlocks = text.split(/class="result\s+results_links/);
+    const results = [];
+    const blocks = text.split(/class="[^"]*results_links[^"]*"/);
 
-    for (let i = 1; i < resultBlocks.length; i++) {
-      const block = resultBlocks[i];
-      const titleMatch = block.match(/class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/);
-      const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/);
+    for (let i = 1; i < blocks.length; i++) {
+      const block = blocks[i];
+      const titleMatch = block.match(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i)
+        || block.match(/<a[^>]+href="([^"]+)"[^>]+class="[^"]*result__a[^"]*"[^>]*>([\s\S]*?)<\/a>/i);
+      const snipMatch = block.match(/class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/(?:a|td|div|span)>/i);
 
       if (titleMatch) {
         let rawUrl = titleMatch[1];
@@ -35,20 +37,16 @@ export async function searchLiveWeb(query, maxResults = 5) {
           if (u) rawUrl = decodeURIComponent(u[1]);
         }
         const title = titleMatch[2].replace(/<[^>]+>/g, '').trim();
-        const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+        const snippet = snipMatch ? snipMatch[1].replace(/<[^>]+>/g, '').trim() : '';
 
-        // Ignora anúncios internos e resultados vazios
         if (title && rawUrl && !rawUrl.includes('duckduckgo.com/y.js')) {
-          items.push({
-            title,
-            url: rawUrl,
-            snippet
-          });
+          results.push({ title, url: rawUrl, snippet });
         }
       }
+      if (results.length >= maxResults) break;
     }
 
-    return items.slice(0, maxResults);
+    return results;
   } catch (err) {
     return [];
   }

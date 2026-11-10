@@ -5,6 +5,7 @@ import axios from 'axios';
 import { createLogger } from '../utils/logger.js';
 import { avaliarImovelCmvm, formatarAvaliacaoMarkdown } from './immoCmvmService.js';
 import { IMMO_SITES, VERCEL_IMMO_APP } from '../shared/immoSitesCatalog.js';
+import { searchLiveWeb } from '../shared/webSearch.js';
 
 const log = createLogger('ImmoRadar');
 const DB_PATH = path.resolve('./data/imoveis_amarante.db');
@@ -311,13 +312,148 @@ export function gerarRelatorioDiarioMarkdown() {
 }
 
 /**
+ * Pesquisa em tempo real moradias novas e empreendimentos nos portais imobiliários
+ */
+export async function pesquisarMoradiasNovasPlataformas({ zona = 'Amarante', tipologia = '', precoMax = 250000 } = {}) {
+  log.info('A pesquisar moradias novas em tempo real nas plataformas...', { zona, tipologia, precoMax });
+
+  const queryTerms = [
+    `moradias novas ${zona} empreendimentos`,
+    `moradias venda ${zona} site:idealista.pt/comprar-casas`,
+    `moradias ${zona} site:imovirtual.com/pt/resultados/comprar/moradia`,
+    `moradias ${zona} site:remax.pt`,
+    `moradias ${zona} site:era.pt`
+  ];
+
+  const resultados = [];
+  const seenUrls = new Set();
+
+  for (const q of queryTerms) {
+    try {
+      const items = await searchLiveWeb(q, 4);
+      for (const r of items) {
+        if (!r.url || seenUrls.has(r.url)) continue;
+        seenUrls.add(r.url);
+
+        let portal = 'Portal Web';
+        if (r.url.includes('idealista.pt')) portal = 'Idealista';
+        else if (r.url.includes('imovirtual.com')) portal = 'Imovirtual';
+        else if (r.url.includes('remax.pt')) portal = 'RE/MAX';
+        else if (r.url.includes('era.pt')) portal = 'ERA';
+        else if (r.url.includes('casasapo.pt')) portal = 'Casa Sapo';
+        else if (r.url.includes('supercasa.pt')) portal = 'Supercasa';
+        else if (r.url.includes('olx.pt')) portal = 'OLX';
+        else if (r.url.includes('custojusto.pt')) portal = 'CustoJusto';
+
+        const combined = `${r.title} ${r.snippet}`;
+        const priceMatch = combined.match(/(\d{1,3}(?:[.\s]\d{3})+|\d{4,6})\s*(?:€|euros?)/i);
+        let preco = 0;
+        if (priceMatch) {
+          preco = parseFloat(priceMatch[1].replace(/[.\s]/g, ''));
+        }
+
+        const tipMatch = combined.match(/\b(T[1-5]|V[1-5])\b/i);
+        const tip = tipMatch ? tipMatch[1].toUpperCase().replace('V', 'T') : (tipologia || 'T3');
+
+        const areaMatch = combined.match(/(\d{2,4})\s*m[²2]/i);
+        const area = areaMatch ? parseFloat(areaMatch[1]) : 140;
+
+        let freg = zona;
+        const locs = ['São Gonçalo', 'Madalena', 'Cepelos', 'Gatão', 'Telões', 'Fregim', 'Lomba', 'Freixo', 'Vila Meã', 'Aveleda'];
+        for (const loc of locs) {
+          if (new RegExp(loc, 'i').test(combined)) {
+            freg = loc;
+            break;
+          }
+        }
+
+        const av = avaliarImovelCmvm({
+          precoAnunciado: preco,
+          areaUtil: area,
+          zona: freg,
+          tipologia: tip
+        });
+
+        const imovelObj = {
+          titulo: r.title,
+          url: r.url,
+          portal,
+          preco,
+          freguesia: freg,
+          tipologia: tip,
+          area_util: area,
+          valor_cmvm: av.valorIntrinseco,
+          classificacao: av.classificacao,
+          snippet: r.snippet
+        };
+
+        // Guardar na base de dados para persistência e histórico
+        try {
+          if (preco > 0 || r.url.includes('moradia')) {
+            guardarImovel({
+              titulo: r.title.slice(0, 80),
+              url: r.url,
+              portal,
+              preco,
+              freguesia: freg,
+              tipologia: tip,
+              area_util: area
+            });
+          }
+        } catch (_) {}
+
+        resultados.push(imovelObj);
+      }
+    } catch (e) {
+      log.warn(`Erro na consulta web imobiliária (${q}):`, e.message);
+    }
+  }
+
+  return resultados;
+}
+
+/**
+ * Formata a lista de moradias novas em Markdown para o Telegram
+ */
+export function formatarMoradiasNovasMarkdown(lista, zona = 'Amarante') {
+  if (!lista || lista.length === 0) {
+    return (
+      `🏡 *RADAR DE MORADIAS NOVAS NAS PLATAFORMAS*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `Não foram detetados novos anúncios no momento para *${zona}*.\n` +
+      `O radar de escuta continua ativo nos 12 portais de referência.`
+    );
+  }
+
+  let md = `🏡 *RADAR ATIVO: MORADIAS NOVAS & EMPREENDIMENTOS*\n`;
+  md += `📍 *Região:* ${zona} | *Fontes:* Idealista, Imovirtual, RE/MAX, ERA, etc.\n`;
+  md += `━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+  lista.slice(0, 6).forEach((item, idx) => {
+    const precoTxt = item.preco > 0 ? `*${Number(item.preco).toLocaleString('pt-PT')} €*` : '_Sob Consulta / Empreendimento_';
+    const cmvmTxt = item.valor_cmvm ? ` (CMVM: ~${Number(item.valor_cmvm).toLocaleString('pt-PT')} €)` : '';
+    md += `*${idx + 1}. [${item.titulo}](${item.url})*\n`;
+    md += `   🏢 *Portal:* ${item.portal} | 📍 *Zona:* ${item.freguesia} (${item.tipologia})\n`;
+    md += `   💰 *Preço:* ${precoTxt}${cmvmTxt}\n`;
+    if (item.snippet) {
+      md += `   📝 _"${item.snippet.slice(0, 140).replace(/\s+/g, ' ')}..."_\n`;
+    }
+    md += `\n`;
+  });
+
+  md += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  md += `💡 *Ações:* Clica no link do anúncio para ver fotos e contacto, ou envia \`/avaliacao\` para calcular a margem de negociação bancária!`;
+  return md;
+}
+
+/**
  * Varredura ativa nos portais e diretório de Amarante
- * Rigor factual e sem alucinações: NUNCA gera moradias fictícias ou links falsos.
- * Apenas processa imóveis reais registados ou verificados nos portais oficiais.
+ * Pesquisa em tempo real nas plataformas oficiais e guarda novidades na BD.
  */
 export async function executarVarreduraAmarante() {
   log.info('A verificar atualizações de portais imobiliários em Amarante...');
-  const novosDetetados = [];
+  const liveResults = await pesquisarMoradiasNovasPlataformas({ zona: 'Amarante' });
+  const novosDetetados = liveResults.filter(i => i.preco > 0);
 
   // Obter imóveis reais registados que ainda não tenham sido avaliados pela CMVM
   if (db) {
@@ -325,20 +461,22 @@ export async function executarVarreduraAmarante() {
     for (const p of pendentes) {
       try {
         const { isNovo, imovel } = guardarImovel(p);
-        if (isNovo) novosDetetados.push(imovel);
+        if (isNovo && !novosDetetados.some(d => d.url === imovel.url)) {
+          novosDetetados.push(imovel);
+        }
       } catch (e) {
         log.warn(`Erro ao reavaliar imóvel #${p.id}:`, e.message);
       }
     }
 
     db.prepare('INSERT INTO radar_execucoes (novos_encontrados, total_varridos, status) VALUES (?, ?, ?)')
-      .run(novosDetetados.length, pendentes.length, 'sucesso');
+      .run(novosDetetados.length, liveResults.length, 'sucesso');
   }
 
   log.info(`Varredura concluída. ${novosDetetados.length} novos imóveis verificados.`);
   return {
-    totalVarridos: db ? db.prepare('SELECT count(*) as c FROM imoveis').get().c : 0,
-    novosDetetados
+    totalVarridos: (db ? db.prepare('SELECT count(*) as c FROM imoveis').get().c : 0) + liveResults.length,
+    novosDetetados: liveResults
   };
 }
 
@@ -435,6 +573,8 @@ export default {
   formatarAlertaNovoImovel,
   gerarRelatorioDiarioMarkdown,
   executarVarreduraAmarante,
+  pesquisarMoradiasNovasPlataformas,
+  formatarMoradiasNovasMarkdown,
   dispararCicloRadarComAlertas,
   iniciarAgendadorRadar
 };

@@ -11,6 +11,8 @@ import {
 import {
   gerarRelatorioDiarioMarkdown,
   executarVarreduraAmarante,
+  pesquisarMoradiasNovasPlataformas,
+  formatarMoradiasNovasMarkdown,
   obterOportunidades,
   formatarAlertaNovoImovel,
   listarImoveis
@@ -80,30 +82,7 @@ function handleAvaliacaoComando(args = '') {
  */
 async function handleRadarPesquisa() {
   const { totalVarridos, novosDetetados } = await executarVarreduraAmarante();
-  let md = `📡 *RADAR DE MERCADO — VARREDURA CONCLUÍDA*\n`;
-  md += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-  md += `🔍 *Portais e fontes pesquisadas:* 12 portais de referência em Amarante\n`;
-  md += `📋 *Anúncios processados:* ${totalVarridos}\n`;
-  md += `✨ *Novos imóveis detetados:* **${novosDetetados.length}**\n\n`;
-
-  if (novosDetetados.length > 0) {
-    md += `🚨 *NOVAS ENTRADAS ANALISADAS (NORMAS CMVM):*\n\n`;
-    novosDetetados.forEach((im, i) => {
-      const precoFmt = Number(im.preco).toLocaleString('pt-PT');
-      const cmvmFmt = Number(im.valor_cmvm).toLocaleString('pt-PT');
-      md += `*${i + 1}. ${im.titulo}*\n`;
-      md += `• Local: *${im.freguesia}* | Portal: *${im.portal}*\n`;
-      md += `• Preço Pedido: **${precoFmt} €** | Avaliação CMVM: **${cmvmFmt} €**\n`;
-      md += `• Veredito: *${im.classificacao}*\n`;
-      md += `• 🔗 [Ver Anúncio no Portal](${im.url})\n\n`;
-    });
-  } else {
-    md += `ℹ️ _Todos os imóveis ativos nos 12 portais já constam da tua base de dados. O radar permanece em escuta contínua e alertará assim que entrar uma nova moradia._\n\n`;
-  }
-
-  md += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-  md += `📱 _Podes consultar todos os filtros na Mini App:_ \`${VERCEL_IMMO_APP.url}\``;
-  return md;
+  return formatarMoradiasNovasMarkdown(novosDetetados, 'Amarante');
 }
 
 /**
@@ -154,7 +133,13 @@ export async function handle(text = '', ctx = {}) {
     return await askAgent({ chatId, workerTag: 'immo', prompt: '/reset' });
   }
 
-  // 1. Radar e Pesquisa Imediata
+  // 1. Moradias Novas nas Plataformas
+  if (/^\/(moradias?_novas?|novas?|moradias?)\b/i.test(trimmed) || /moradias?\s+novas?|pesquisar?\s+moradias?|casas?\s+novas?|empreendimentos?/i.test(trimmed)) {
+    const res = await pesquisarMoradiasNovasPlataformas({ zona: 'Amarante' });
+    return formatarMoradiasNovasMarkdown(res, 'Amarante');
+  }
+
+  // 2. Radar e Pesquisa Imediata
   if (/^\/(radar|pesquisar|pesquisa|pesquisar_imoveis|varredura)\b/i.test(trimmed)) {
     return await handleRadarPesquisa();
   }
