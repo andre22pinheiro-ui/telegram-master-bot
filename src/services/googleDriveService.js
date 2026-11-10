@@ -44,6 +44,7 @@ export function getServiceAccountCredentials() {
   }
 
   const defaultPaths = [
+    '/etc/secrets/service-account.json',
     path.resolve(ROOT_DIR, 'service-account.json'),
     path.resolve(ROOT_DIR, 'google-credentials.json'),
     path.resolve(ROOT_DIR, 'credentials.json'),
