@@ -25,6 +25,8 @@ import { uploadToCloudinary } from './src/shared/cloudinaryCdn.js';
 import { transcribeTelegramAudio } from './src/shared/whisperAudio.js';
 import { pcRemoteBridge } from './src/services/pcRemoteBridge.js';
 import { safeExecute, withTypingHeartbeat } from './src/utils/resilience.js';
+import { tryAutoDispatch } from './src/services/zeroPaperDispatcher.js';
+import appFrotaService from './src/services/appFrotaService.js';
 import { 
   authMiddleware, 
   cleanChatMiddleware, 
@@ -86,11 +88,12 @@ try { mkdirSync('./logs', { recursive: true }); } catch {}
 function getMasterKeyboard() {
   return Markup.inlineKeyboard([
     [
-      Markup.button.webApp('🏡 1. Abrir Mini App Família', VERCEL_APPS.familiar.url)
+      Markup.button.webApp('🏡 1. Abrir Mini App Família', VERCEL_APPS.familiar.url),
+      Markup.button.webApp('🚛 2. ZeroPaperFrota (Web)', VERCEL_APPS.appfrota.url)
     ],
     [
-      Markup.button.webApp('🚌 2. RotaBus VIP (Web)', VERCEL_APPS.rotabus.url),
-      Markup.button.url('📲 Descarregar APK', VERCEL_APPS.rotabus.apkUrl)
+      Markup.button.webApp('🚌 3. RotaBus VIP (Web)', VERCEL_APPS.rotabus.url),
+      Markup.button.callback('📊 Estado da Frota', 'act_frota_status')
     ],
     [
       Markup.button.webApp('⚽ 3. MatchPro', VERCEL_APPS.matchpro.url),
@@ -195,6 +198,22 @@ async function processPhotoWithVision(ctx, botToken, contextTag = 'geral') {
 
     const analysis = await analyzeImageBuffer(downloaded.buffer, 'image/jpeg', defaultPrompt);
 
+    // Tenta ingestão automática no ZeroPaper se a foto for de viatura, odómetro ou anomalia
+    if (contextTag === 'master' || contextTag === 'frotas') {
+      try {
+        const dispatchInput = caption ? `${caption}. Detalhes visuais da imagem: ${analysis}` : analysis;
+        const autoResp = await tryAutoDispatch(dispatchInput, ctx);
+        if (autoResp) {
+          let photoReply = autoResp;
+          if (cdnUrl) photoReply += `\n\n📸 [Fotografia arquivada na cloud](${cdnUrl})`;
+          await sendReply(ctx, photoReply);
+          return;
+        }
+      } catch (e) {
+        log.warn('Auto-dispatch via imagem falhou, fallback para análise pura:', e.message);
+      }
+    }
+
     let reply = `🔍 *Análise de Imagem (IA Multimodal):*\n\n${analysis}`;
     if (cdnUrl) {
       reply += `\n\n☁️ [Ver no Cloudinary CDN](${cdnUrl})`;
@@ -228,6 +247,14 @@ async function rotear(ctx, text) {
     const briefing = await getDailyNewsBriefing();
     await sendReply(ctx, briefing);
     return null;
+  }
+
+  // 3.0 AUTO-DISPATCH COGNITIVO UNIVERSAL (ZeroPaperFrota + Pessoal + Remoto)
+  // "para mim e para todos um unico bot em que enviamos os dados e ele automaticamente coloca no sitio"
+  const autoDispatchResp = await safeExecute(() => tryAutoDispatch(trimmed, ctx), 'ZeroPaper Auto-Dispatch', 15000);
+  if (autoDispatchResp) {
+    log.info('[Master] Auto-Dispatch executado e persistido com sucesso', { input: trimmed.substring(0, 60) });
+    return autoDispatchResp;
   }
 
   // 3. Comandos Específicos com Barra (/)
@@ -752,9 +779,19 @@ bot.action('act_frotas', async (ctx) => {
   await ctx.answerCbQuery();
   const resp = await handleFrotas('');
   await sendReply(ctx, resp, Markup.inlineKeyboard([
-    [Markup.webApp('🚌 Abrir RotaBus GPS', VERCEL_APPS.rotabus.url), Markup.url('📲 Descarregar APK', VERCEL_APPS.rotabus.apkUrl)],
-    [Markup.callback('🚛 Porto ➔ Lisboa', 'frota_porto_lisboa'), Markup.callback('🚛 Amarante ➔ Porto', 'frota_amarante_porto')],
-    [Markup.callback('⏱️ Tacógrafo: 4.5h', 'btn_tacho_45'), Markup.callback('⏱️ Tacógrafo: 9.0h', 'btn_tacho_90')]
+    [Markup.button.webApp('🚛 Abrir ZeroPaperFrota', VERCEL_APPS.appfrota.url), Markup.button.callback('📊 Estado da Frota', 'act_frota_status')],
+    [Markup.button.webApp('🚌 Abrir RotaBus GPS', VERCEL_APPS.rotabus.url), Markup.button.url('📲 Descarregar APK', VERCEL_APPS.rotabus.apkUrl)],
+    [Markup.button.callback('🚛 Porto ➔ Lisboa', 'frota_porto_lisboa'), Markup.button.callback('🚛 Amarante ➔ Porto', 'frota_amarante_porto')],
+    [Markup.button.callback('⏱️ Tacógrafo: 4.5h', 'btn_tacho_45'), Markup.button.callback('⏱️ Tacógrafo: 9.0h', 'btn_tacho_90')]
+  ]));
+});
+
+bot.action('act_frota_status', async (ctx) => {
+  await ctx.answerCbQuery();
+  const report = await appFrotaService.getFrotaStatusReport();
+  await sendReply(ctx, report, Markup.inlineKeyboard([
+    [Markup.button.webApp('🚛 Abrir AppFrota Web', VERCEL_APPS.appfrota.url)],
+    [Markup.button.callback('🔄 Atualizar Estado', 'act_frota_status')]
   ]));
 });
 

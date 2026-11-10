@@ -1,6 +1,22 @@
 {
   "shopping": [
     {
+      "id": "1794311924761",
+      "item_text": "aveia",
+      "category": "geral",
+      "completed": false,
+      "created_by_name": "André",
+      "created_at": "2026-11-10T11:58:44.761Z"
+    },
+    {
+      "id": "1794311924757",
+      "item_text": "iogurtes proteicos",
+      "category": "geral",
+      "completed": false,
+      "created_by_name": "André",
+      "created_at": "2026-11-10T11:58:44.757Z"
+    },
+    {
       "id": "1",
       "item_text": "Leite meio gordo",
       "category": "mercearia",

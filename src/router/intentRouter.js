@@ -9,6 +9,17 @@ const log = createLogger('IntentRouter');
  */
 const INTENT_PATTERNS = [
   {
+    intent: 'FROTAS',
+    patterns: [
+      /^\/(frotas?|frota|veiculos?|viaturas?|rota|tac[oó]grafo|km|anomalia|avaria|checklist|higienizac[aã]o|stock|pesados?|motorista)\b/i,
+      /\b([0-9]{2}[- ][A-Z]{2}[- ][0-9]{2}|[A-Z]{2}[- ][0-9]{2}[- ][A-Z]{2}|[0-9]{2}[- ][0-9]{2}[- ][A-Z]{2}|[A-Z]{2}[- ][0-9]{2}[- ][0-9]{2})\b/i,
+      /\b(39-hz-66|01-aa-01|55-tn-89|12-xe-34|99-zz-99|volvo\s*b12b|citaro|iveco\s*daily|lion'?s\s*city)\b/i,
+      /\b(frota|viatura|viaturas|carrinha|carrinhas|autocarro|autocarros|pesados?|tac[oó]grafo|motorista|condutor|rota|trajeto|km|quil[oó]metros?|od[oó]metro|gas[oó]leo|consumo|turno)\b/i,
+      /\b(oficina|anomalia|avaria|avarias|higieniza[cç][aã]o|lavagem|desinfe[cç][aã]o|checklist|vistoria|pe[cç]as|repara[cç][aã]o|imobilizad[ao]|reboque|trav[oõ]es)\b/i,
+      /\b(openroute|openrouteservice|ors|rotabus|appfrota|zeropaperfrota)\b/i,
+    ],
+  },
+  {
     intent: 'IMMO',
     patterns: [
       /^\/(immo|imovel|imóvel|avaliac[aã]o|avaliacao|radar|pesquisar_imoveis|relatorio_imoveis|sites_immo|alertas_immo)\b/i,
@@ -20,17 +31,9 @@ const INTENT_PATTERNS = [
   {
     intent: 'DEV',
     patterns: [
-      /^\/(criar_app|build|projetos?|github|vercel|deploy|code|codigo|app|api|script|instalar|npm|node)\b/i,
+      /^\/(criar_app|build|projetos?|github|vercel|deploy|code|codigo|app|api|script|instalar|npm|node|pc|print|surface)\b/i,
       /\b(criar|cria|build|deploy|github|vercel|reposit[oó]rio|projeto|aplicação|app|api|script|código|instalar|programar|desenvolver)\b/i,
-      /\b(erro|bug|debug|fix|corrigir|problema no código)\b/i,
-    ],
-  },
-  {
-    intent: 'FROTAS',
-    patterns: [
-      /^\/(frotas?|rota|tac[oó]grafo|caminhão|pesado|condutor|km|quilómetros?)\b/i,
-      /\b(frota|pesados?|caminhão|caminhões|tacógrafo|tac[oó]grafo|condutor|motorista|rota|trajeto|percurso|km|quilómetros?|gasoleo|gasolina|consumo)\b/i,
-      /\b(openroute|openrouteservice|ors|rotabus)\b/i,
+      /\b(erro|bug|debug|fix|corrigir|problema no código|surface|print.*pc|captura.*ecr[aã])\b/i,
     ],
   },
   {
@@ -50,7 +53,7 @@ const INTENT_PATTERNS = [
   {
     intent: 'GERAL',
     patterns: [
-      /^\/(compras?|notas?|briefing|tarefa|lembrete|lista|agenda|memo|carolina|ergonomia)\b/i,
+      /^\/(compras?|notas?|briefing|tarefa|lembrete|lembretes|lista|agenda|memo|carolina|ergonomia)\b/i,
       /\b(comprar|compras|lista|supermercado|nota|notas|briefing|tarefa|tarefas|lembrete|lembretes|agenda|memo|recados?|carolina|escola|falta|consulta|pediatra|ergonomia|postura|sa[uú]de)\b/i,
     ],
   },

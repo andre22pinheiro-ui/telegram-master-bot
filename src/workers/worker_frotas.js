@@ -1,13 +1,15 @@
-// src/workers/worker_frotas.js — Módulo de Gestão de Frotas, Tacógrafo e RotaBus VIP
+// src/workers/worker_frotas.js — Módulo de Gestão de Frotas, Tacógrafo e ZeroPaperFrota
 import axios from 'axios';
 import { createLogger } from '../utils/logger.js';
 import { VERCEL_APPS } from '../shared/appsCatalog.js';
 import { askAgent } from '../services/reasoningService.js';
+import appFrotaService, { APPFROTA_WEB_URL } from '../services/appFrotaService.js';
+import { tryAutoDispatch } from '../services/zeroPaperDispatcher.js';
 
 const log = createLogger('WorkerFrotas');
 const ORS_API_KEY = process.env.ORS_API_KEY || '';
 
-// ─── Helpers de Geocoding ────────────────────────────────────────────────────
+// ─── Helpers de Geocoding & Rotas ───────────────────────────────────────────
 
 async function geocode(place) {
   try {
@@ -24,7 +26,6 @@ async function geocode(place) {
 
 async function calcularRota(origem, destino, perfil = 'driving-hgv') {
   if (!ORS_API_KEY) {
-    // Fallback inteligente para o RotaBus
     const routeUrl = VERCEL_APPS.rotabus.getRouteUrl(origem, destino);
     return {
       km: '~ (calculado no RotaBus)',
@@ -80,10 +81,6 @@ function calcularTacografo(horasConducao) {
   const h = parseFloat(horasConducao);
   if (isNaN(h) || h <= 0) return null;
 
-  // Regras EU (Reg. 561/2006):
-  // Máx. 4.5h contínuas → pausa obrigatória de 45 min (ou 15+30 min)
-  // Máx. diário: 9h (extensível a 10h 2x por semana)
-  // Máx. semanal: 56h | Bisemanal: 90h
   const pausasNecessarias = Math.floor(h / 4.5);
   const tempoPausa = pausasNecessarias * 45;
   const tempoTotal = h * 60 + tempoPausa;
@@ -109,7 +106,7 @@ function calcularTacografo(horasConducao) {
   };
 }
 
-// ─── Handlers ────────────────────────────────────────────────────────────────
+// ─── Handlers de Comandos ───────────────────────────────────────────────────
 
 async function handleRota(args) {
   if (!args || !args.includes(' para ')) {
@@ -155,7 +152,7 @@ function handleTacografo(args) {
   );
 }
 
-// ─── Dispatcher ──────────────────────────────────────────────────────────────
+// ─── Dispatcher Central de Frotas ───────────────────────────────────────────
 
 export async function handle(text, ctx = {}) {
   const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
@@ -166,20 +163,38 @@ export async function handle(text, ctx = {}) {
     return await askAgent({ chatId, workerTag: 'frotas', prompt: '/reset' });
   }
 
+  // 1. Estado da frota
+  if (/^\/(frota|frotas|veiculos|viaturas)\b/i.test(trimmed)) {
+    return await appFrotaService.getFrotaStatusReport();
+  }
+
+  // 2. Comandos dedicados AppFrota
   if (/^\/rota\s+/i.test(trimmed)) return handleRota(trimmed.replace(/^\/rota\s+/i, ''));
   if (/^\/tacografo\s*/i.test(trimmed)) return handleTacografo(trimmed.replace(/^\/tacografo\s*/i, ''));
 
+  // 3. Auto-Dispatch Cognitivo Universal (Ingestão em linguagem natural)
+  const dispatchRes = await tryAutoDispatch(trimmed, ctx);
+  if (dispatchRes) {
+    return dispatchRes;
+  }
+
+  // 4. Menu de Ajuda
   if (/^\/(start|menu|ajuda)\b/i.test(trimmed)) {
     return (
-      `🚛 *Gestão de Frotas, Tacógrafo & RotaBus VIP*\n\n` +
-      `Módulo especializado em transporte rodoviário pesado e autocarros.\n\n` +
-      `• \`/rota ORIGEM para DESTINO\` — Cálculo de itinerário para pesados\n` +
-      `• \`/tacografo HORAS\` — Verificação legal (CE 561/2006)\n\n` +
-      `💡 *Conversa & Resolução de Problemas:* Podes colocar qualquer questão sobre rotas, tempos de descanso, condução em equipa ou legislação europeia que eu analiso em detalhe!`
+      `🚛 *ZeroPaperFrota & Gestão de Frotas Inteligente*\n\n` +
+      `Envia qualquer mensagem de voz ou texto que eu registo diretamente no sistema:\n\n` +
+      `• *Quilómetros:* "Turno 39-HZ-66 com 155.300 km"\n` +
+      `• *Avarias:* "Luz do óleo acesa na carrinha 55-TN-89"\n` +
+      `• *Limpeza:* "Carrinha 01-AA-01 lavada e desinfetada"\n` +
+      `• *Checklist:* "Checklist da 39-HZ-66 ok"\n` +
+      `• *Estado:* \`/frota\` — Resumo geral de viaturas e avarias\n` +
+      `• *Rotas:* \`/rota ORIGEM para DESTINO\`\n` +
+      `• *Tacógrafo:* \`/tacografo HORAS\`\n\n` +
+      `🌐 [Aceder ao AppFrota Web](${APPFROTA_WEB_URL})`
     );
   }
 
-  // Resolução inteligente de desafios complexos de frotas e diálogo livre
+  // 5. Diálogo livre com IA especializada em transporte rodoviário
   return await askAgent({
     chatId,
     workerTag: 'frotas',
