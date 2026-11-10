@@ -77,3 +77,4 @@ export function validateTelegramWebAppData(initData, botToken = process.env.TELE
     return { valid: false, reason: err.message };
   }
 }
+

@@ -3,6 +3,7 @@ import axios from 'axios';
 import { createLogger } from '../utils/logger.js';
 import { VERCEL_APPS, formatAllVercelAppsMarkdown } from '../shared/appsCatalog.js';
 import { askAgent } from '../services/reasoningService.js';
+import { pcRemoteBridge } from '../services/pcRemoteBridge.js';
 
 const log = createLogger('WorkerDev');
 
@@ -95,6 +96,34 @@ export async function handle(text, ctx = {}) {
 
   if (/^\/(reset|limpar)\b/i.test(lower)) {
     return await askAgent({ chatId, workerTag: 'dev', prompt: '/reset' });
+  }
+
+  // Controlo Remoto do PC Surface
+  if (/^\/(print|screenshot|ecra|ecrã)\b/.test(lower)) {
+    try {
+      if (ctx.sendChatAction) await ctx.sendChatAction('upload_photo');
+    } catch {}
+    const res = await pcRemoteBridge.executeOnPc({ orderText: '/print', chatId });
+    if (res.imageBase64 && ctx.replyWithPhoto) {
+      await ctx.replyWithPhoto(
+        { source: Buffer.from(res.imageBase64, 'base64') },
+        { caption: '🖥️ *Screenshot do teu PC Surface*\n_Capturado em direto via ponte remota Windows._', parse_mode: 'Markdown' }
+      );
+      return '';
+    }
+    return res.output || '⚠️ Falha ao capturar ecrã do PC.';
+  }
+
+  if (/^\/(pc|pc_status|hardware|pc_sistema)\b/.test(lower)) {
+    const res = await pcRemoteBridge.executeOnPc({ orderText: '/pc', chatId, timeoutMs: 12000 });
+    return res.output || '⚠️ PC Surface não respondeu.';
+  }
+
+  if (/^\/(compilar|build)\b/.test(lower)) {
+    const proj = text.replace(/^\/(compilar|build)\s*/i, '').trim();
+    if (!proj) return '💡 *Como compilar:* `/compilar NomeDoProjeto`\nExemplo: `/compilar matchpro`';
+    const res = await pcRemoteBridge.executeOnPc({ orderText: `/compilar ${proj}`, chatId, timeoutMs: 90000 });
+    return res.output || '⚠️ Falha na compilação remota.';
   }
 
   if (/^\/(projetos?|github|repos?)\b/.test(lower)) return handleProjetos();

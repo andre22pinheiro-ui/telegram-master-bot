@@ -224,6 +224,114 @@ function handleProteina(input) {
     `_Guardado nas notas e acessível no briefing de hoje!_`;
 }
 
+// ─── Lembretes Proativos ───────────────────────────────────────────────────
+
+export function parseReminderInput(input) {
+  const now = new Date();
+  const trimmed = input.trim();
+
+  // 1. Relativo: "daqui a X minutos / horas / dias" ou "+X min / +Xh"
+  const relMatch = trimmed.match(/(?:daqui\s+a\s+|\+)(\d+)\s*(min(?:uto)?s?|m|h(?:ora)?s?|d(?:ia)?s?)\b(?:\s+(?:de\s+|para\s+)?(.*))?/i);
+  if (relMatch) {
+    const val = parseInt(relMatch[1], 10);
+    const unit = relMatch[2].toLowerCase();
+    const text = relMatch[3] || 'Lembrete';
+    let ms = 0;
+    if (unit.startsWith('m')) ms = val * 60 * 1000;
+    else if (unit.startsWith('h')) ms = val * 60 * 60 * 1000;
+    else if (unit.startsWith('d')) ms = val * 24 * 60 * 60 * 1000;
+    const triggerAt = new Date(now.getTime() + ms);
+    return { triggerAt, text: text.trim() };
+  }
+
+  // 2. Horário fixo hoje ou amanhã: "16:30 ligar ao médico", "às 16h30 ligar ao médico", "amanhã às 10:00..."
+  const isAmanha = /amanh[aã]/i.test(trimmed);
+  const clean = trimmed.replace(/(?:^|\s)amanh[aã](?:\s|$)/gi, ' ').trim();
+  const timeMatch = clean.match(/^(?:(?:às|as)\s+)?(\d{1,2})(?:[:hH](\d{2}))?\s*(?:h|horas)?(?:\s+(?:de\s+|para\s+)?(.+))?$/i);
+  if (timeMatch) {
+    const hours = parseInt(timeMatch[1], 10);
+    const minutes = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+    const text = (timeMatch[3] || 'Lembrete').trim();
+
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      const target = new Date();
+      if (isAmanha) {
+        target.setDate(target.getDate() + 1);
+      }
+      target.setHours(hours, minutes, 0, 0);
+      if (!isAmanha && target.getTime() <= now.getTime()) {
+        target.setDate(target.getDate() + 1);
+      }
+      return { triggerAt: target, text };
+    }
+  }
+
+  return {
+    triggerAt: new Date(now.getTime() + 60 * 60 * 1000),
+    text: trimmed
+  };
+}
+
+function handleLembretes(rawInput, ctx) {
+  const input = (rawInput || '').trim();
+  const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
+  const user = { first_name: ctx.from?.first_name || 'André', username: ctx.from?.username };
+
+  // Subcomando apagar / remover
+  if (/^(apagar|remover|del)\s+/i.test(input)) {
+    const idOrNum = input.replace(/^(apagar|remover|del)\s+/i, '').trim();
+    const reminders = (familyDb.getReminders() || []).filter(r => !r.sent);
+    const idx = parseInt(idOrNum, 10) - 1;
+    let target = null;
+    if (!isNaN(idx) && idx >= 0 && idx < reminders.length) {
+      target = reminders[idx];
+    } else {
+      target = reminders.find(r => r.id === idOrNum);
+    }
+    if (target) {
+      familyDb.deleteReminder(target.id);
+      return `🗑️ Lembrete *"${target.text}"* cancelado com sucesso.`;
+    }
+    return `❌ Lembrete não encontrado. Usa \`/lembretes\` para ver a lista.`;
+  }
+
+  // Listar lembretes
+  if (!input || input === 'ver' || input === 'listar') {
+    const pending = (familyDb.getReminders() || []).filter(r => !r.sent).sort((a, b) => new Date(a.trigger_at) - new Date(b.trigger_at));
+    if (pending.length === 0) {
+      return `🔔 *Lembretes Proativos*\n\nNão tens nenhum lembrete ativo agendado.\n\nPara agendar:\n• \`/lembrete às 16:30 Ligar ao engenheiro\`\n• \`/lembrete daqui a 20 min Tirar o pão\`\n• \`/lembrete amanhã às 09:00 Rever orçamento\``;
+    }
+    let txt = `🔔 *Lembretes Ativos Agendados (${pending.length}):*\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    pending.forEach((r, i) => {
+      const dt = new Date(r.trigger_at).toLocaleString('pt-PT', { timeZone: 'Europe/Lisbon', hour12: false });
+      txt += `${i + 1}. ⏰ *${dt}* — _"${r.text}"_\n`;
+    });
+    txt += `━━━━━━━━━━━━━━━━━━━━━━━━\n_Para cancelar um lembrete: \`/lembrete apagar 1\`_`;
+    return txt;
+  }
+
+  // Criar novo lembrete
+  const parsed = parseReminderInput(input);
+  const reminder = familyDb.addReminder({
+    text: parsed.text,
+    triggerAt: parsed.triggerAt,
+    chatId,
+    user
+  });
+
+  const formattedDate = new Date(parsed.triggerAt).toLocaleString('pt-PT', {
+    timeZone: 'Europe/Lisbon',
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+
+  return `🔔 *Lembrete Proativo Agendado!*\n━━━━━━━━━━━━━━━━━━━━━━━━\n⏰ *Quando:* ${formattedDate}\n📋 *Assunto:* _"${parsed.text}"_\n━━━━━━━━━━━━━━━━━━━━━━━━\n_O bot enviará uma notificação push direta para este chat no momento exato._`;
+}
+
 // ─── Dispatcher Principal ───────────────────────────────────────────────────
 
 export async function handle(text, ctx = {}) {
@@ -270,10 +378,9 @@ export async function handle(text, ctx = {}) {
     return handleNotas(args);
   }
 
-  if (/^\/lembrete\s+/i.test(trimmed)) {
-    const args = trimmed.replace(/^\/lembrete\s+/i, '').trim();
-    familyDb.addNote('🔔 Lembrete', args, 'amber', { first_name: 'André' });
-    return `🔔 Lembrete guardado:\n*"${args}"*`;
+  if (/^\/(lembrete|lembretes)\b/i.test(trimmed)) {
+    const args = trimmed.replace(/^\/(lembrete|lembretes)\s*/i, '').trim();
+    return handleLembretes(args, ctx);
   }
 
   // Conversa contínua e resolução de problemas do dia a dia pessoal e familiar

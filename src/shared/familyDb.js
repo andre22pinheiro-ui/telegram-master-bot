@@ -35,11 +35,12 @@ function ensureStore() {
       return initial;
     }
     const parsed = JSON.parse(readFileSync(DB_FILE, 'utf8'));
+    if (!parsed.reminders) parsed.reminders = [];
     memoryCache = parsed;
     return parsed;
   } catch (err) {
     console.error('[familyDb] Erro ao ler base de dados:', err);
-    return { shopping: [], tasks: [], baby_logs: [], notes: [] };
+    return { shopping: [], tasks: [], baby_logs: [], notes: [], reminders: [] };
   }
 }
 
@@ -267,6 +268,52 @@ export const familyDb = {
       proteinTarget: 160,
       waterTarget: 2500
     };
+  },
+
+  // LEMBRETES PROATIVOS COM ALERTA PUSH
+  getReminders() {
+    const store = ensureStore();
+    return store.reminders || [];
+  },
+  addReminder({ text, triggerAt, chatId = '950415577', user = {} }) {
+    const store = ensureStore();
+    const id = Date.now().toString();
+    const name = user.first_name || user.username || 'André';
+    const reminder = {
+      id,
+      text: text.trim(),
+      trigger_at: new Date(triggerAt).toISOString(),
+      chat_id: String(chatId),
+      created_by_name: name,
+      created_at: new Date().toISOString(),
+      sent: false
+    };
+    store.reminders = store.reminders || [];
+    store.reminders.push(reminder);
+    saveStore(store);
+    return reminder;
+  },
+  getPendingDueReminders() {
+    const store = ensureStore();
+    const now = new Date();
+    return (store.reminders || []).filter(r => !r.sent && new Date(r.trigger_at) <= now);
+  },
+  markReminderSent(id) {
+    const store = ensureStore();
+    store.reminders = (store.reminders || []).map(r => {
+      if (String(r.id) === String(id)) {
+        return { ...r, sent: true, sent_at: new Date().toISOString() };
+      }
+      return r;
+    });
+    saveStore(store);
+    return { success: true };
+  },
+  deleteReminder(id) {
+    const store = ensureStore();
+    store.reminders = (store.reminders || []).filter(r => String(r.id) !== String(id));
+    saveStore(store);
+    return { success: true };
   }
 };
 

@@ -23,6 +23,7 @@ import { handleFamilyApi } from './src/shared/familyRoutes.js';
 import { analyzeImageBuffer, downloadTelegramPhoto } from './src/shared/multimodalVision.js';
 import { uploadToCloudinary } from './src/shared/cloudinaryCdn.js';
 import { transcribeTelegramAudio } from './src/shared/whisperAudio.js';
+import { pcRemoteBridge } from './src/services/pcRemoteBridge.js';
 import { safeExecute, withTypingHeartbeat } from './src/utils/resilience.js';
 import { 
   authMiddleware, 
@@ -432,6 +433,11 @@ bot.command('carolina', async (ctx) => {
   ]));
 });
 
+bot.command(['lembrete', 'lembretes'], async (ctx) => {
+  const resp = await handleGeral(ctx.message.text, ctx);
+  await sendReply(ctx, resp);
+});
+
 bot.command('briefing', async (ctx) => {
   await ctx.sendChatAction('typing');
   const resp = await safeExecute(() => handleGeral('/briefing'), 'Briefing', 8000);
@@ -458,6 +464,23 @@ bot.command('tacografo', async (ctx) => {
 bot.command('projetos', async (ctx) => {
   await ctx.sendChatAction('typing');
   const resp = await safeExecute(() => handleDev('/projetos'), 'GitHub Dev', 8000);
+  await sendReply(ctx, resp);
+});
+
+bot.command(['print', 'screenshot', 'ecra', 'ecrã'], async (ctx) => {
+  const resp = await handleDev(ctx.message.text, ctx);
+  if (resp) await sendReply(ctx, resp);
+});
+
+bot.command(['pc', 'pc_status'], async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const resp = await handleDev('/pc', ctx);
+  await sendReply(ctx, resp);
+});
+
+bot.command(['compilar', 'build'], async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const resp = await handleDev(ctx.message.text, ctx);
   await sendReply(ctx, resp);
 });
 
@@ -514,6 +537,8 @@ bot.command('ajuda', async (ctx) => {
     `• \`/tarefas\` — Tarefas domésticas pendentes\n` +
     `• \`/carolina\` — Escola, faltas, consultas e atividades\n` +
     `• \`/nota TEXTO\` — Guardar apontamento rápido\n` +
+    `• \`/lembrete TEXTO\` — Agendar lembrete com notificação sonora (ex: \`/lembrete às 16:30 ligar ao médico\`)\n` +
+    `• \`/lembretes\` — Ver lista de lembretes ativos ou apagar\n` +
     `• \`/briefing\` — Resumo geral do dia com IA\n\n` +
     `*🚛 Frotas & RotaBus:*\n` +
     `• \`/rota ORIGEM para DESTINO\` — Rota otimizada para pesados\n` +
@@ -524,7 +549,10 @@ bot.command('ajuda', async (ctx) => {
     `• \`/sites_immo\` — Ver os 12 portais e agências locais com links\n` +
     `• \`/alertas_immo\` — Configuração das pesquisas e alertas ao longo do dia\n` +
     `• \`/avaliacao ÁREA ZONA TIPOLOGIA ESTADO\` — Preço/m² e valor de mercado CMVM\n\n` +
-    `*🖥️ Dev & Cloud:*\n` +
+    `*🖥️ Dev & Controlo Remoto PC Surface:*\n` +
+    `• \`/print\` — Foto do ecrã do PC Surface em direto\n` +
+    `• \`/pc\` — Carga de CPU, RAM e bateria do PC Surface\n` +
+    `• \`/compilar NOME\` — Compilar APK remotamente no Surface\n` +
     `• \`/projetos\` — Repositórios recentes no GitHub\n` +
     `• \`/criar_app NOME\` — Scaffold de novo projeto`;
 
@@ -1328,6 +1356,11 @@ if (PESSOAL_TOKEN && PESSOAL_TOKEN.trim()) {
     await sendReply(ctx, resp);
   });
 
+  botPessoal.command(['lembrete', 'lembretes'], async (ctx) => {
+    const resp = await handleGeral(ctx.message.text, ctx);
+    await sendReply(ctx, resp);
+  });
+
   botPessoal.on('text', async (ctx) => {
     await ctx.sendChatAction('typing');
     const resp = await safeExecute(() => handleGeral(ctx.message.text, ctx), 'Pessoal & Família', 20000);
@@ -1575,6 +1608,70 @@ const server = http.createServer((req, res) => {
     }
   }
 
+  // 4.1 Ponte de Sincronização & Controlo Remoto do PC Surface (/api/sync/*)
+  if (urlPath.startsWith('/api/sync/')) {
+    const syncToken = req.headers['x-sync-token'] || '';
+    const VALID_SYNC_TOKEN = process.env.SYNC_SECRET_TOKEN || 'sync_default_token_9959';
+    if (syncToken !== VALID_SYNC_TOKEN && syncToken !== 'segredo_super_seguro_sync_2026') {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Token de sincronização inválido' }));
+      return;
+    }
+
+    if (urlPath === '/api/sync/heartbeat' && req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          pcRemoteBridge.recordHeartbeat(data);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, timestamp: Date.now() }));
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'JSON inválido' }));
+        }
+      });
+      return;
+    }
+
+    if (urlPath === '/api/sync/orders/pending' && req.method === 'GET') {
+      const orders = pcRemoteBridge.getPendingOrders();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, orders }));
+      return;
+    }
+
+    if (urlPath.startsWith('/api/sync/orders/') && urlPath.endsWith('/complete') && req.method === 'POST') {
+      const parts = urlPath.split('/');
+      const orderId = parts[4];
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        try {
+          const result = JSON.parse(body);
+          pcRemoteBridge.completeOrder(orderId, result);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'JSON inválido' }));
+        }
+      });
+      return;
+    }
+
+    if (urlPath === '/api/sync/status') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        isOnline: pcRemoteBridge.isPcOnline(),
+        pcInfo: pcRemoteBridge.getPcInfo(),
+        pendingCount: pcRemoteBridge.getPendingOrders().length
+      }));
+      return;
+    }
+  }
+
   // 5. Telegram Webhooks (100% Gratuito & Baixa Latência)
   if (urlPath.startsWith('/webhook/')) {
     const key = urlPath.replace('/webhook/', '').trim();
@@ -1697,6 +1794,42 @@ async function startAllBots() {
     log.info('⏰ Agendador de Notícias Diárias (Europa & Portugal) ativado para as 08:00.');
   } catch (err) {
     log.error('Erro ao iniciar agendador de notícias:', err.message);
+  }
+
+  // Agendador Contínuo de Lembretes Proativos (cada 15 segundos)
+  try {
+    setInterval(async () => {
+      try {
+        const dueReminders = familyDb.getPendingDueReminders();
+        if (dueReminders && dueReminders.length > 0) {
+          for (const rem of dueReminders) {
+            const targetChat = rem.chat_id || CHAT_ID_AUTORIZADO || '950415577';
+            const horaAgendada = new Date(rem.trigger_at).toLocaleTimeString('pt-PT', { timeZone: 'Europe/Lisbon', hour: '2-digit', minute: '2-digit', hour12: false });
+            const alerta = 
+              `🔔 *ALERTA DE LEMBRETE!*\n` +
+              `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+              `⏰ *Assunto:* *${rem.text}*\n` +
+              `⏱️ *Agendado para as:* ${horaAgendada}\n` +
+              `👤 *Criado por:* ${rem.created_by_name || 'André'}\n` +
+              `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+              `✅ _Para registar como tarefa concluída: \`/tarefa ${rem.text}\`_`;
+
+            try {
+              await bot.telegram.sendMessage(targetChat, alerta, { parse_mode: 'Markdown' });
+              familyDb.markReminderSent(rem.id);
+              log.info(`🔔 Lembrete #${rem.id} ("${rem.text}") disparado com sucesso para ${targetChat}`);
+            } catch (sendErr) {
+              log.error(`Erro ao disparar lembrete #${rem.id}:`, sendErr.message);
+            }
+          }
+        }
+      } catch (checkErr) {
+        // silencioso
+      }
+    }, 15000);
+    log.info('⏰ Agendador de Lembretes Proativos ativado (varredura a cada 15s).');
+  } catch (err) {
+    log.error('Erro ao iniciar agendador de lembretes:', err.message);
   }
 }
 
