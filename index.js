@@ -39,7 +39,10 @@ import {
 } from './src/services/tvService.js';
 import { 
   isDriveConfigured, 
-  backupDatabaseToDrive 
+  backupDatabaseToDrive,
+  restoreAllFromDrive,
+  syncAllToDrive,
+  startAutoDriveSync
 } from './src/services/googleDriveService.js';
 import { 
   iniciarAgendadorRadar, 
@@ -878,7 +881,7 @@ bot.catch((err, ctx) => {
   ctx?.reply('⚠️ Ocorreu um erro no Master. O bot continua ativo.').catch(() => {});
 });
 
-botInstances.push({ name: 'Master (@AndrePinheirobot)', bot });
+botInstances.push({ name: 'Master (@AndrePinheirobot)', bot, key: 'master' });
 
 // 2. WORKER DEV (@DesSofBot) ──────────────────────────────────────────────────
 const DEV_TOKEN = process.env.TELEGRAM_DEV_TOKEN || process.env.TELEGRAM_BOT_TOKEN_DEV || process.env.DEV_TOKEN;
@@ -941,7 +944,7 @@ if (DEV_TOKEN && DEV_TOKEN.trim()) {
   });
 
   botDev.catch((err) => log.error('Erro no Worker Dev', err?.message || err));
-  botInstances.push({ name: 'Dev (@DesSofBot)', bot: botDev });
+  botInstances.push({ name: 'Dev (@DesSofBot)', bot: botDev, key: 'dev' });
 }
 
 // 3. WORKER FROTAS (@TrasFrotBot) ─────────────────────────────────────────────
@@ -1023,7 +1026,7 @@ if (FROTAS_TOKEN && FROTAS_TOKEN.trim()) {
   });
 
   botFrotas.catch((err) => log.error('Erro no Worker Frotas', err?.message || err));
-  botInstances.push({ name: 'Frotas (@TrasFrotBot)', bot: botFrotas });
+  botInstances.push({ name: 'Frotas (@TrasFrotBot)', bot: botFrotas, key: 'frotas' });
 }
 
 // 4. WORKER IMMO (@ppspppBot) ─────────────────────────────────────────────────
@@ -1153,7 +1156,7 @@ if (IMMO_TOKEN && IMMO_TOKEN.trim()) {
   });
 
   botImmo.catch((err) => log.error('Erro no Worker Immo', err?.message || err));
-  botInstances.push({ name: 'Immo (@ppspppBot)', bot: botImmo });
+  botInstances.push({ name: 'Immo (@ppspppBot)', bot: botImmo, key: 'immo' });
 }
 
 // 5. WORKER PESSOAL (@AndTrarBOT) ─────────────────────────────────────────────
@@ -1228,7 +1231,7 @@ if (PESSOAL_TOKEN && PESSOAL_TOKEN.trim()) {
   });
 
   botPessoal.catch((err) => log.error('Erro no Worker Pessoal', err?.message || err));
-  botInstances.push({ name: 'Pessoal (@AndTrarBOT)', bot: botPessoal });
+  botInstances.push({ name: 'Pessoal (@AndTrarBOT)', bot: botPessoal, key: 'pessoal' });
 }
 
 // 6. WORKER NUTRIÇÃO (@Nutriainbot) ───────────────────────────────────────────
@@ -1340,13 +1343,18 @@ if (NUTRICAO_TOKEN && NUTRICAO_TOKEN.trim()) {
   });
 
   botNutri.catch((err) => log.error('Erro no Worker Nutrição', err?.message || err));
-  botInstances.push({ name: 'Nutrição (@Nutriainbot)', bot: botNutri });
+  botInstances.push({ name: 'Nutrição (@Nutriainbot)', bot: botNutri, key: 'nutricao' });
 }
 
 // ─── Encerramento Seguro ─────────────────────────────────────────────────────
 
-const shutdown = (signal) => {
+const shutdown = async (signal) => {
   log.info(`A terminar bots (${signal})...`);
+  try {
+    await syncAllToDrive();
+  } catch (err) {
+    log.error('Erro na sincronização com o Google Drive no encerramento:', err?.message || err);
+  }
   botInstances.forEach(({ name, bot: b }) => {
     try {
       b.stop(signal);
@@ -1433,6 +1441,15 @@ const server = http.createServer((req, res) => {
     }
   }
 
+  // 5. Telegram Webhooks (100% Gratuito & Baixa Latência)
+  if (urlPath.startsWith('/webhook/')) {
+    const key = urlPath.replace('/webhook/', '').trim();
+    const target = botInstances.find((b) => b.key === key);
+    if (target?.webhookCallback) {
+      return target.webhookCallback(req, res);
+    }
+  }
+
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Endpoint não encontrado' }));
 });
@@ -1456,6 +1473,10 @@ server.listen(PORT, () => {
 // ─── Arranque Paralelo de Todos os Bots Ativos ─────────────────────────────
 
 async function launchSingleBot(name, b, retries = 5, delayMs = 5000) {
+  try {
+    // Remover webhook pendente se estivermos a usar polling local
+    await b.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
+  } catch {}
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       log.info(`A iniciar [${name}] (tentativa ${attempt}/${retries})...`);
@@ -1473,10 +1494,40 @@ async function launchSingleBot(name, b, retries = 5, delayMs = 5000) {
   }
 }
 
-function startAllBots() {
-  log.info(`A arrancar ${botInstances.length} bots em paralelo com suporte completo a Mini Apps...`);
-  for (const { name, bot: b } of botInstances) {
-    launchSingleBot(name, b);
+async function startAllBots() {
+  // 1. Restauro inicial de base de dados e ficheiros persistentes do Google Drive
+  try {
+    await restoreAllFromDrive();
+  } catch (err) {
+    log.error('Erro ao restaurar do Google Drive:', err?.message || err);
+  }
+
+  // 2. Iniciar agendador de sincronização contínua com o Google Drive (cada 15 min)
+  startAutoDriveSync(15);
+
+  const renderUrl = process.env.RENDER_EXTERNAL_URL || process.env.WEBHOOK_BASE_URL;
+
+  if (renderUrl && !process.env.USE_POLLING) {
+    log.info(`🌐 Modo Webhook Ativo no Render.com! URL base: ${renderUrl}`);
+    for (const item of botInstances) {
+      const webhookUrl = `${renderUrl}/webhook/${item.key}`;
+      try {
+        log.info(`A configurar webhook para [${item.name}] em: ${webhookUrl}`);
+        item.webhookCallback = item.bot.webhookCallback(`/webhook/${item.key}`);
+        await item.bot.telegram.setWebhook(webhookUrl, {
+          allowed_updates: ['message', 'callback_query']
+        });
+        log.info(`✅ Webhook registado com sucesso para [${item.name}] -> ${webhookUrl}`);
+      } catch (err) {
+        log.error(`⚠️ Falha ao registar webhook para [${item.name}], fallback para polling:`, err?.message || err);
+        launchSingleBot(item.name, item.bot);
+      }
+    }
+  } else {
+    log.info(`A arrancar ${botInstances.length} bots em modo Polling...`);
+    for (const { name, bot: b } of botInstances) {
+      launchSingleBot(name, b);
+    }
   }
 
   // Iniciar agendador de pesquisas e alertas diários de novos imóveis

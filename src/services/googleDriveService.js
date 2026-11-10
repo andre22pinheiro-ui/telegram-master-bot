@@ -1,7 +1,7 @@
-// src/services/googleDriveService.js — Gestor de Armazenamento e Backups no Google Drive
+// src/services/googleDriveService.js — Gestor de Armazenamento e Backups Persistentes no Google Drive
 import crypto from 'crypto';
 import axios from 'axios';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createLogger } from '../utils/logger.js';
@@ -13,7 +13,7 @@ const ROOT_DIR = path.resolve(__dirname, '../../');
 // Configurações lidas do .env
 const GOOGLE_SA_KEY_RAW = process.env.GOOGLE_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_CREDENTIALS_JSON;
 const GOOGLE_SA_PATH = process.env.GOOGLE_SERVICE_ACCOUNT_PATH;
-const GOOGLE_DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID; // Opcional: ID da pasta no Drive
+export const DEFAULT_DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '19QWucMs263vBHjswpoeG79TKlha603Cj';
 
 // Cache do token em memória
 let cachedToken = null;
@@ -22,16 +22,16 @@ let tokenExpiresAt = 0;
 /**
  * Carrega a chave de conta de serviço (Service Account) se disponível.
  */
-function getServiceAccountCredentials() {
+export function getServiceAccountCredentials() {
   if (GOOGLE_SA_KEY_RAW) {
     try {
-      // Se for base64, descodifica; senão faz parse direto do JSON
-      const jsonStr = GOOGLE_SA_KEY_RAW.trim().startsWith('{')
-        ? GOOGLE_SA_KEY_RAW
-        : Buffer.from(GOOGLE_SA_KEY_RAW, 'base64').toString('utf-8');
+      const trimmed = GOOGLE_SA_KEY_RAW.trim();
+      const jsonStr = trimmed.startsWith('{')
+        ? trimmed
+        : Buffer.from(trimmed, 'base64').toString('utf-8');
       return JSON.parse(jsonStr);
     } catch (e) {
-      log.error('Erro ao interpretar GOOGLE_SERVICE_ACCOUNT_KEY do .env:', e.message);
+      log.error('Erro ao interpretar GOOGLE_SERVICE_ACCOUNT_KEY:', e.message);
     }
   }
 
@@ -43,7 +43,6 @@ function getServiceAccountCredentials() {
     }
   }
 
-  // Verifica ficheiro padrão credentials.json ou service-account.json na raiz do projeto
   const defaultPaths = [
     path.resolve(ROOT_DIR, 'service-account.json'),
     path.resolve(ROOT_DIR, 'google-credentials.json'),
@@ -54,7 +53,6 @@ function getServiceAccountCredentials() {
   for (const p of defaultPaths) {
     if (existsSync(p)) {
       try {
-        log.info(`Chave de Service Account detetada em: ${p}`);
         return JSON.parse(readFileSync(p, 'utf-8'));
       } catch (e) {
         log.warn(`Ficheiro encontrado em ${p} mas inválido:`, e.message);
@@ -66,16 +64,17 @@ function getServiceAccountCredentials() {
 }
 
 /**
- * Verifica se o Google Drive está devidamente configurado.
+ * Verifica se o Google Drive está devidamente configurado com credenciais válidas.
  */
 export function isDriveConfigured() {
-  return !!getServiceAccountCredentials();
+  const sa = getServiceAccountCredentials();
+  return Boolean(sa && sa.client_email && sa.private_key);
 }
 
 /**
  * Obtém um Access Token válido da Google OAuth2 via JWT Bearer (RS256).
  */
-async function getAccessToken() {
+export async function getAccessToken() {
   const now = Math.floor(Date.now() / 1000);
   if (cachedToken && tokenExpiresAt > now + 60) {
     return cachedToken;
@@ -93,7 +92,7 @@ async function getAccessToken() {
 
   const payload = {
     iss: sa.client_email,
-    scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive',
+    scope: 'https://www.googleapis.com/auth/drive',
     aud: sa.token_uri || 'https://oauth2.googleapis.com/token',
     exp: now + 3600,
     iat: now
@@ -118,157 +117,224 @@ async function getAccessToken() {
 
   cachedToken = res.data.access_token;
   tokenExpiresAt = now + (res.data.expires_in || 3600);
-  log.info('Novo Access Token do Google Drive obtido com sucesso!');
+  log.info('Access Token do Google Drive renovado com sucesso.');
   return cachedToken;
 }
 
 /**
- * Cria uma pasta no Google Drive caso não exista.
+ * Pesquisa um ficheiro pelo nome dentro da pasta especificada.
  */
-export async function getOrCreateFolder(folderName = 'TelegramBot_Nuvem') {
-  const token = await getAccessToken();
-
-  // Pesquisar se a pasta já existe
-  const q = `mimeType='application/vnd.google-apps.folder' and name='${folderName}' and trashed=false`;
-  const listRes = await axios.get('https://www.googleapis.com/drive/v3/files', {
-    headers: { Authorization: `Bearer ${token}` },
-    params: { q, fields: 'files(id, name)' }
-  });
-
-  if (listRes.data.files && listRes.data.files.length > 0) {
-    return listRes.data.files[0].id;
-  }
-
-  // Criar nova pasta
-  const folderMetadata = {
-    name: folderName,
-    mimeType: 'application/vnd.google-apps.folder'
-  };
-
-  if (GOOGLE_DRIVE_FOLDER_ID) {
-    folderMetadata.parents = [GOOGLE_DRIVE_FOLDER_ID];
-  }
-
-  const createRes = await axios.post('https://www.googleapis.com/drive/v3/files', folderMetadata, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    }
-  });
-
-  log.info(`Pasta criada no Google Drive: ${folderName} (ID: ${createRes.data.id})`);
-  return createRes.data.id;
-}
-
-/**
- * Envia um ficheiro local para o Google Drive.
- */
-export async function uploadFileToDrive({ filePath, fileName, mimeType = 'application/octet-stream', folderName = 'TelegramBot_Nuvem' }) {
-  if (!existsSync(filePath)) {
-    throw new Error(`Ficheiro não encontrado: ${filePath}`);
-  }
-
-  const token = await getAccessToken();
-  const folderId = await getOrCreateFolder(folderName);
-  const fileContent = readFileSync(filePath);
-  const targetName = fileName || path.basename(filePath);
-
-  const metadata = {
-    name: targetName,
-    parents: [folderId]
-  };
-
-  const boundary = '-------GoogleDriveUploadBoundary' + Date.now();
-  const delimiter = `\r\n--${boundary}\r\n`;
-  const closeDelimiter = `\r\n--${boundary}--`;
-
-  const multipartBody = Buffer.concat([
-    Buffer.from(
-      delimiter +
-      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-      JSON.stringify(metadata) +
-      delimiter +
-      `Content-Type: ${mimeType}\r\n\r\n`
-    ),
-    fileContent,
-    Buffer.from(closeDelimiter)
-  ]);
-
-  const res = await axios.post(
-    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink,size',
-    multipartBody,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': `multipart/related; boundary=${boundary}`
+export async function findFileInFolder(fileName, folderId = DEFAULT_DRIVE_FOLDER_ID) {
+  try {
+    const token = await getAccessToken();
+    const res = await axios.get('https://www.googleapis.com/drive/v3/files', {
+      headers: { Authorization: `Bearer ${token}` },
+      params: {
+        q: `'${folderId}' in parents and name = '${fileName}' and trashed = false`,
+        fields: 'files(id, name, modifiedTime, size)'
       }
+    });
+    if (res.data.files && res.data.files.length > 0) {
+      return res.data.files[0];
     }
-  );
-
-  log.info(`Ficheiro enviado para o Google Drive: ${targetName} (ID: ${res.data.id})`);
-  return res.data;
+  } catch (err) {
+    log.error(`Erro ao pesquisar ficheiro ${fileName} no Drive:`, err.message);
+  }
+  return null;
 }
 
 /**
- * Faz backup de emergência ou agendado da base de dados e listas para o Google Drive.
+ * Transfere um ficheiro do Google Drive para o disco local.
+ */
+export async function downloadFileFromDrive(fileId, localDestinationPath) {
+  try {
+    const token = await getAccessToken();
+    const res = await axios.get(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+      headers: { Authorization: `Bearer ${token}` },
+      responseType: 'arraybuffer'
+    });
+
+    const dir = path.dirname(localDestinationPath);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+    writeFileSync(localDestinationPath, Buffer.from(res.data));
+    log.info(`✅ Ficheiro restaurado do Google Drive: ${path.basename(localDestinationPath)} (${res.data.byteLength} bytes)`);
+    return true;
+  } catch (err) {
+    log.error(`Erro ao descarregar ficheiro ${fileId} do Drive:`, err.message);
+    return false;
+  }
+}
+
+/**
+ * Atualiza um ficheiro existente no Google Drive ou tenta criar se for novo.
+ */
+export async function uploadOrUpdateFileInDrive({ filePath, fileName, folderId = DEFAULT_DRIVE_FOLDER_ID }) {
+  if (!existsSync(filePath)) {
+    log.warn(`Ficheiro local não encontrado para upload: ${filePath}`);
+    return null;
+  }
+
+  const token = await getAccessToken();
+  const targetName = fileName || path.basename(filePath);
+  const fileContent = readFileSync(filePath);
+
+  // 1. Verificar se o ficheiro já existe na pasta
+  const existing = await findFileInFolder(targetName, folderId);
+
+  if (existing) {
+    // Atualização in-place (PATCH) — utiliza a quota do dono original do ficheiro!
+    try {
+      const updateRes = await axios.patch(
+        `https://www.googleapis.com/upload/drive/v3/files/${existing.id}?uploadType=media`,
+        fileContent,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/octet-stream'
+          }
+        }
+      );
+      log.info(`☁️ Ficheiro sincronizado no Drive (atualizado): ${targetName} [ID: ${existing.id}]`);
+      return updateRes.data;
+    } catch (patchErr) {
+      log.error(`Falha ao atualizar ${targetName} no Drive:`, patchErr.message);
+      return null;
+    }
+  }
+
+  // 2. Se o ficheiro não existe, tenta criar
+  try {
+    const metadata = {
+      name: targetName,
+      parents: [folderId]
+    };
+    const boundary = '-------DriveSyncBoundary' + Date.now();
+    const delimiter = `\r\n--${boundary}\r\n`;
+    const closeDelimiter = `\r\n--${boundary}--`;
+    const multipartBody = Buffer.concat([
+      Buffer.from(
+        delimiter +
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+        JSON.stringify(metadata) +
+        delimiter +
+        'Content-Type: application/octet-stream\r\n\r\n'
+      ),
+      fileContent,
+      Buffer.from(closeDelimiter)
+    ]);
+
+    const createRes = await axios.post(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name',
+      multipartBody,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': `multipart/related; boundary=${boundary}`
+        }
+      }
+    );
+    log.info(`✅ Novo ficheiro criado com sucesso no Google Drive: ${targetName} (ID: ${createRes.data.id})`);
+    return createRes.data;
+  } catch (createErr) {
+    if (createErr.response?.data?.error?.reason === 'storageQuotaExceeded' || createErr.response?.status === 403) {
+      log.warn(
+        `⚠️ Google Drive Quota: A Service Account tem 0 bytes de quota direta para criar novos ficheiros em drives pessoais. ` +
+        `Para ativar a persistência total de "${targetName}", coloque uma primeira cópia deste ficheiro na pasta "Backups Telegram Bot" ` +
+        `(ID: ${folderId}). A partir daí, as atualizações serão 100% automáticas via PATCH!`
+      );
+    } else {
+      log.error(`Erro ao criar ${targetName} no Drive:`, createErr.message);
+    }
+    return null;
+  }
+}
+
+/**
+ * Ficheiros críticos a sincronizar com a nuvem (Google Drive).
+ */
+export const CRITICAL_FILES = [
+  { name: 'autorizados.json', path: './data/autorizados.json' },
+  { name: 'conversas_historico.json', path: './data/conversas_historico.json' },
+  { name: 'family_store.json', path: './data/family_store.json' },
+  { name: 'imoveis_amarante.db', path: './data/imoveis_amarante.db' }
+];
+
+/**
+ * Restaura todos os ficheiros críticos do Google Drive para o disco local durante o arranque do servidor.
+ */
+export async function restoreAllFromDrive(folderId = DEFAULT_DRIVE_FOLDER_ID) {
+  if (!isDriveConfigured()) {
+    log.warn('Google Drive não configurado; arranque prossegue com dados locais.');
+    return false;
+  }
+
+  log.info(`🔄 A verificar e restaurar dados persistentes do Google Drive (Pasta: ${folderId})...`);
+  let restoredCount = 0;
+
+  for (const item of CRITICAL_FILES) {
+    const localTarget = path.resolve(ROOT_DIR, item.path);
+    const remoteFile = await findFileInFolder(item.name, folderId);
+
+    if (remoteFile) {
+      log.info(`📥 A descarregar [${item.name}] da nuvem (modificado: ${remoteFile.modifiedTime})...`);
+      const ok = await downloadFileFromDrive(remoteFile.id, localTarget);
+      if (ok) restoredCount++;
+    } else {
+      log.debug(`Ficheiro [${item.name}] não encontrado no Drive; mantém-se a versão local se existir.`);
+    }
+  }
+
+  log.info(`🏁 Restauro do Google Drive concluído (${restoredCount}/${CRITICAL_FILES.length} ficheiros restaurados).`);
+  return restoredCount > 0;
+}
+
+/**
+ * Sincroniza todos os ficheiros críticos locais para o Google Drive.
+ */
+export async function syncAllToDrive(folderId = DEFAULT_DRIVE_FOLDER_ID) {
+  if (!isDriveConfigured()) return false;
+
+  log.info('☁️ A sincronizar ficheiros críticos para o Google Drive...');
+  let synced = 0;
+
+  for (const item of CRITICAL_FILES) {
+    const localPath = path.resolve(ROOT_DIR, item.path);
+    if (existsSync(localPath)) {
+      const res = await uploadOrUpdateFileInDrive({
+        filePath: localPath,
+        fileName: item.name,
+        folderId
+      });
+      if (res) synced++;
+    }
+  }
+
+  log.info(`✅ Sincronização para o Google Drive terminada (${synced}/${CRITICAL_FILES.length} sincronizados).`);
+  return synced > 0;
+}
+
+/**
+ * Inicia o agendador de sincronização periódica (ex: a cada 15 minutos).
+ */
+export function startAutoDriveSync(intervalMinutes = 15, folderId = DEFAULT_DRIVE_FOLDER_ID) {
+  if (!isDriveConfigured()) return;
+
+  const ms = intervalMinutes * 60 * 1000;
+  setInterval(async () => {
+    try {
+      await syncAllToDrive(folderId);
+    } catch (err) {
+      log.error('Erro no ciclo de sincronização automática com o Google Drive:', err.message);
+    }
+  }, ms);
+
+  log.info(`⏰ Sincronizador persistente do Google Drive ativo (a cada ${intervalMinutes} minutos).`);
+}
+
+/**
+ * Função mantida para retrocompatibilidade com comandos de backup manual (/backup).
  */
 export async function backupDatabaseToDrive() {
-  if (!isDriveConfigured()) {
-    return {
-      success: false,
-      message: 'Google Drive ainda não está configurado com credenciais no .env.'
-    };
-  }
-
-  try {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const uploaded = [];
-
-    // 1. Base de dados SQLite
-    const dbPaths = [
-      path.resolve('./family.db'),
-      path.resolve('./data/family.db'),
-      path.resolve('./data_central.json')
-    ];
-
-    for (const p of dbPaths) {
-      if (existsSync(p)) {
-        const ext = path.extname(p);
-        const name = `backup_${path.basename(p, ext)}_${timestamp}${ext}`;
-        const fileInfo = await uploadFileToDrive({
-          filePath: p,
-          fileName: name,
-          folderName: 'TelegramBot_Backups'
-        });
-        uploaded.push({ name, link: fileInfo.webViewLink });
-      }
-    }
-
-    // 2. Lista M3U de Portugal
-    const m3uPath = existsSync(path.resolve('./public/portugal.m3u'))
-      ? path.resolve('./public/portugal.m3u')
-      : 'c:/Users/Surface_Dpc/Desktop/PORTUGAL_COMPLETO.m3u';
-
-    if (existsSync(m3uPath)) {
-      const fileInfo = await uploadFileToDrive({
-        filePath: m3uPath,
-        fileName: `PORTUGAL_COMPLETO_${timestamp}.m3u`,
-        folderName: 'TelegramBot_IPTV'
-      });
-      uploaded.push({ name: 'Lista Portugal M3U', link: fileInfo.webViewLink });
-    }
-
-    return {
-      success: true,
-      files: uploaded,
-      timestamp
-    };
-  } catch (err) {
-    log.error('Erro no backup para o Google Drive:', err.message);
-    return {
-      success: false,
-      error: err.message
-    };
-  }
+  return syncAllToDrive();
 }
-
