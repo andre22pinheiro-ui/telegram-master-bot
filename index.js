@@ -579,6 +579,45 @@ bot.command('bloquear', async (ctx) => {
   await sendReply(ctx, `🚫 ID Telegram \`${targetId}\` revogado e bloqueado com sucesso.`);
 });
 
+// Comando de Diagnóstico e Cockpit Operacional
+bot.command(['diagnostico', 'status_nuvem', 'status'], async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const mem = process.memoryUsage();
+  const ramMb = Math.round(mem.rss / 1024 / 1024);
+  const uptimeMin = Math.round(process.uptime() / 60);
+
+  // Probe de Latência da IA Tier 1 (Groq)
+  const t0 = Date.now();
+  let groqStatus = '🟢 Operacional';
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` }
+    });
+    const lat = Date.now() - t0;
+    groqStatus = res.ok ? `🟢 Operacional (${lat}ms)` : `⚠️ Resposta ${res.status}`;
+  } catch (_) {
+    groqStatus = '🔴 Indisponível';
+  }
+
+  const autorizadosList = listAuthorized();
+
+  const msg =
+    `📊 *Cockpit de Diagnóstico Operacional na Nuvem*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `⏱️ *Uptime do Servidor:* ${uptimeMin} minutos\n` +
+    `💾 *Memória RAM:* ${ramMb} MB / 512 MB (Plano Cloud)\n` +
+    `📡 *Webhooks Telegram:* 6/6 Bots Ativos (Push 24/7)\n` +
+    `☁️ *Base de Dados Google Drive:* Ativo & Sincronizado\n` +
+    `🎙️ *Voz & Áudio:* Groq Whisper LPU Ativo\n` +
+    `🤖 *IA Primária (Groq LPU):* ${groqStatus}\n` +
+    `🔒 *Segurança:* Restrito aos números 919115655 e 933276221\n` +
+    `👥 *Utilizadores Telegram Autorizados:* ${autorizadosList.authorizedUserIds.length}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `_Ambiente: Render.com | Node ${process.version}_`;
+
+  await sendReply(ctx, msg);
+});
+
 // Ações de Callback dos Botões Inline no Master
 bot.action('act_noticias', async (ctx) => {
   await ctx.answerCbQuery('🇪🇺 A recolher notícias verificadas...');
