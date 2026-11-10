@@ -381,70 +381,29 @@ export async function handle(text, ctx = {}) {
     return handleNotas(args);
   }
 
-  if (/^\/(pesquisa|procura|web|google)\b/i.test(trimmed)) {
-    const query = trimmed.replace(/^\/(pesquisa|procura|web|google)\s*/i, '').trim();
-    if (!query) {
-      return `🔍 *Pesquisa na Internet*\n\nUsa: \`/pesquisa <termo>\`\n\n*Exemplos:*\n• \`/pesquisa previsão do tempo em Amarante\`\n• \`/pesquisa notícias sobre combustíveis em Portugal\`\n• \`/pesquisa horários farmácia Amarante\``;
-    }
-    const results = await searchLiveWeb(query, 4);
-    if (!results || results.length === 0) {
-      return `🔍 Não foram encontrados resultados recentes na Web para *"${query}"*.`;
-    }
-    let txt = `🌐 *Resultados da Pesquisa Web para:* _"${query}"_\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    results.forEach((r, idx) => {
-      txt += `*${idx + 1}. [${r.title}](${r.url})*\n`;
-      if (r.snippet) txt += `   ${r.snippet.slice(0, 150)}...\n\n`;
-    });
-    txt += `━━━━━━━━━━━━━━━━━━━━━━━━`;
-    return txt;
-  }
-
-  if (/^\/(transito|tr[aâ]nsito|estradas?|a4|ip4|mar[aã]o)\b/i.test(trimmed)) {
-    const termo = trimmed.replace(/^\/(transito|tr[aâ]nsito|estradas?|a4|ip4|mar[aã]o)\s*/i, '').trim() || 'A4 Túnel do Marão Amarante';
-    const results = await searchLiveWeb(`transito condicionamentos obras ${termo}`, 3);
-    if (!results || results.length === 0) {
-      return `🚗 *Informação de Trânsito*\n\nNão foram detetados alertas graves ou acidentes recentes para *${termo}*. A circulação parece regular.`;
-    }
-    let txt = `🚗 *Trânsito & Condicionamentos em Tempo Real:*\n📍 *Via:* _${termo}_\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    results.forEach((r, idx) => {
-      txt += `*${idx + 1}. [${r.title}](${r.url})*\n`;
-      if (r.snippet) txt += `   ${r.snippet.slice(0, 160)}...\n\n`;
-    });
-    txt += `━━━━━━━━━━━━━━━━━━━━━━━━\n_Fontes: Infraestruturas de Portugal, notícias locais e ViaLivre._`;
-    return txt;
-  }
-
-  if (/^\/(combust[ií]veis?|gasoleo|gasolina|gas[oó]leo)\b/i.test(trimmed)) {
-    const resto = trimmed.replace(/^\/(combust[ií]veis?|gasoleo|gasolina|gas[oó]leo)\s*/i, '').trim();
-    const isGasolina = /gasolina|95|98/i.test(trimmed);
-    const mun = resto.replace(/gasolina|gasoleo|95|98/gi, '').trim() || 'Amarante';
-    const dados = await obterPostosMaisBaratos(mun, isGasolina ? 'gasolina' : 'gasoleo');
-    return formatarCombustiveisMarkdown(dados);
-  }
-
-  if (/^\/(farm[aá]cias?|farmacia_servico)\b/i.test(trimmed)) {
-    const termo = trimmed.replace(/^\/(farm[aá]cias?|farmacia_servico)\s*/i, '').trim() || 'Amarante';
-    const results = await searchLiveWeb(`farmacias de servico ${termo} permanente`, 3);
-    if (!results || results.length === 0) {
-      return `💊 *Farmácias de Serviço*\n\nConsulta o portal oficial em: https://farmaciasdeservico.net/localidade/porto/amarante`;
-    }
-    let txt = `💊 *Farmácias de Serviço em Tempo Real:*\n📍 *Concelho:* _${termo}_\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    results.forEach((r, idx) => {
-      txt += `*${idx + 1}. [${r.title}](${r.url})*\n`;
-      if (r.snippet) txt += `   ${r.snippet.slice(0, 160)}...\n\n`;
-    });
-    txt += `━━━━━━━━━━━━━━━━━━━━━━━━\n_Dados sincronizados com o portal Farmácias de Serviço e CM Amarante._`;
-    return txt;
+  // ─── Imobiliário & Moradias Novas (Delegação Transparente) ────────────────
+  if (
+    /^\/(moradias?_novas?|moradias?|imoveis|radar|avaliacao|avaliar)\b/i.test(trimmed) ||
+    /\b(moradias?\s+novas?|pesquisar?\s+moradias?|casas?\s+novas?|avaliar\s+im[oó]vel|radar\s+imobili[aá]rio)\b/i.test(trimmed)
+  ) {
+    const { handle: handleImmo } = await import('./worker_immo.js');
+    return await handleImmo(trimmed, ctx);
   }
 
   // ─── Assistente de Email & Resumos Executivos ─────────────────────────────
-  if (/^\/(emails?|correio|inbox)\b/i.test(trimmed)) {
+  if (
+    /^\/(emails?|correio|inbox)\b/i.test(trimmed) ||
+    /\b(l[eê]r?\s+(?:os\s+)?(?:meus\s+)?emails?|ver\s+(?:os\s+)?emails?|mostrar?\s+(?:os\s+)?emails?|resumo\s+(?:dos?\s+)?emails?|caixa\s+de\s+(?:correio|entrada)|inbox|ler\s+mail)\b/i.test(trimmed)
+  ) {
     return await getEmailBriefing(5);
   }
 
-  if (/^\/(ler_email|resumo_email)\b/i.test(trimmed)) {
-    const numMatch = trimmed.match(/^\/(ler_email|resumo_email)\s*(\d*)/i);
-    const num = numMatch && numMatch[2] ? parseInt(numMatch[2], 10) : 1;
+  if (
+    /^\/(ler_email|resumo_email)\b/i.test(trimmed) ||
+    /\b(?:l[eê]r?|resumir?|resumo\s+do)\s+email\s*#?(\d+)\b/i.test(trimmed)
+  ) {
+    const numMatch = trimmed.match(/(?:email\s*#?|\/ler_email\s*|\/resumo_email\s*)(\d+)/i);
+    const num = numMatch && numMatch[1] ? parseInt(numMatch[1], 10) : 1;
     const { success, emails, error } = await fetchRecentEmails(10);
     if (!success || !emails || emails.length === 0) {
       return `❌ Não foi possível carregar os emails: ${error || 'Nenhum email disponível'}`;
@@ -464,12 +423,69 @@ export async function handle(text, ctx = {}) {
     );
   }
 
-  if (/^\/email_status\b/i.test(trimmed)) {
+  if (/^\/email_status\b/i.test(trimmed) || /\b(estado\s+do\s+email|status\s+do\s+email|email\s+configurado)\b/i.test(trimmed)) {
     const st = getEmailStatus();
     if (!st.configured) {
       return `📧 *Estado do Email:* ⚠️ Não configurado no .env.\nAdiciona \`EMAIL_USER\` e \`EMAIL_PASS\` para ativar.`;
     }
     return `📧 *Estado do Email:* 🟢 Conectado a \`${st.maskedEmail}\` via IMAP (${st.host}:${st.port})`;
+  }
+
+  // ─── Pesquisa na Internet em Tempo Real ───────────────────────────────────
+  if (
+    /^\/(pesquisa|procura|web|google)\b/i.test(trimmed) ||
+    /^(?:pesquisar?|procurar?|busca|buscar?)\s+(?:na\s+(?:net|internet|web)\s+)?(.+)/i.test(trimmed)
+  ) {
+    let query = trimmed.replace(/^\/(pesquisa|procura|web|google)\s*/i, '').trim();
+    const natMatch = trimmed.match(/^(?:pesquisar?|procurar?|busca|buscar?)\s+(?:na\s+(?:net|internet|web)\s+)?(.+)/i);
+    if (!query && natMatch) query = natMatch[1].trim();
+
+    if (!query) {
+      return `🔍 *Pesquisa na Internet*\n\nUsa: \`/pesquisa <termo>\`\n\n*Exemplos:*\n• \`/pesquisa previsão do tempo em Amarante\`\n• \`/pesquisa notícias sobre combustíveis em Portugal\`\n• \`/pesquisa horários farmácia Amarante\``;
+    }
+    const results = await searchLiveWeb(query, 4);
+    if (!results || results.length === 0) {
+      return `🔍 Não foram encontrados resultados recentes na Web para *"${query}"*.`;
+    }
+    let txt = `🌐 *Resultados da Pesquisa Web para:* _"${query}"_\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    results.forEach((r, idx) => {
+      txt += `*${idx + 1}. [${r.title}](${r.url})*\n`;
+      if (r.snippet) txt += `   ${r.snippet.slice(0, 150)}...\n\n`;
+    });
+    txt += `━━━━━━━━━━━━━━━━━━━━━━━━`;
+    return txt;
+  }
+
+  // ─── Trânsito & Vias Principais ───────────────────────────────────────────
+  if (
+    /^\/(transito|tr[aâ]nsito|estradas?|a4|ip4|mar[aã]o)\b/i.test(trimmed) ||
+    /\b(tr[aâ]nsito|condicionamentos?|obras\s+na\s+a4|t[uú]nel\s+do\s+mar[aã]o|como\s+est[aá]\s+o\s+tr[aâ]nsito)\b/i.test(trimmed)
+  ) {
+    const termo = trimmed.replace(/^\/(transito|tr[aâ]nsito|estradas?|a4|ip4|mar[aã]o)\s*/i, '').trim() || 'A4 Túnel do Marão Amarante';
+    const results = await searchLiveWeb(`transito condicionamentos obras ${termo}`, 3);
+    if (!results || results.length === 0) {
+      return `🚗 *Informação de Trânsito*\n\nNão foram detetados alertas graves ou acidentes recentes para *${termo}*. A circulação parece regular.`;
+    }
+    let txt = `🚗 *Trânsito & Condicionamentos em Tempo Real:*\n📍 *Via:* _${termo}_\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    results.forEach((r, idx) => {
+      txt += `*${idx + 1}. [${r.title}](${r.url})*\n`;
+      if (r.snippet) txt += `   ${r.snippet.slice(0, 160)}...\n\n`;
+    });
+    txt += `━━━━━━━━━━━━━━━━━━━━━━━━\n_Fontes: Infraestruturas de Portugal, notícias locais e ViaLivre._`;
+    return txt;
+  }
+
+  // ─── Combustíveis DGEG Oficiais ──────────────────────────────────────────
+  if (
+    /^\/(combust[ií]veis?|gasoleo|gasolina|gas[oó]leo)\b/i.test(trimmed) ||
+    /\b(combust[ií]veis?|gas[oó]leo|gasolina|postos?\s+mais\s+baratos?|pre[cç]os?\s+dos?\s+combust[ií]veis?|onde\s+abastecer)\b/i.test(trimmed)
+  ) {
+    const resto = trimmed.replace(/^\/(combust[ií]veis?|gasoleo|gasolina|gas[oó]leo)\s*/i, '').trim();
+    const isGasolina = /gasolina|95|98/i.test(trimmed);
+    const munMatch = trimmed.match(/em\s+([a-zA-ZÀ-ÿ\s]+)/i);
+    const mun = munMatch ? munMatch[1].trim() : (resto.replace(/gasolina|gasoleo|95|98/gi, '').trim() || 'Amarante');
+    const dados = await obterPostosMaisBaratos(mun, isGasolina ? 'gasolina' : 'gasoleo');
+    return formatarCombustiveisMarkdown(dados);
   }
 
   if (/^\/(lembrete|lembretes)\b/i.test(trimmed)) {

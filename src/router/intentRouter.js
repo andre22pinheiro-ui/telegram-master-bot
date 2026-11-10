@@ -23,7 +23,7 @@ const INTENT_PATTERNS = [
     intent: 'IMMO',
     patterns: [
       /^\/(immo|imovel|imóvel|avaliac[aã]o|avaliacao|radar|pesquisar_imoveis|relatorio_imoveis|sites_immo|alertas_immo|moradias?_novas?)\b/i,
-      /\b(imov[eé]l|imóveis|imoveis|imobi[lh]i[aá]rio|avaliac[aã]o|avalia|m2|metro quadrado|amarante|casas?|apartamentos?|terrenos?|moradias?|habita[cç][aã]o|comprar\s+casa|vender\s+casa)\b/i,
+      /\b(imov[eé]l|imóveis|imoveis|imobi[lh]i[aá]rio|avaliac[aã]o|avalia|m2|metro quadrado|casas?|apartamentos?|terrenos?|moradias?|habita[cç][aã]o|comprar\s+casa|vender\s+casa)\b/i,
       /\b(rever\s+an[uú]ncios|an[uú]ncios\s+diariamente|pesquisas?\s+durante\s+o\s+dia|alertas?\s+de\s+im[oó]veis|relat[oó]rio\s+de\s+im[oó]veis|novos\s+im[oó]veis|radar\s+imobili[aá]rio|moradias?\s+novas?)\b/i,
       /\b(pesquisa-imobiliario|immoeval|cmvm)\b/i,
     ],
@@ -46,7 +46,11 @@ const INTENT_PATTERNS = [
   {
     intent: 'GERAL',
     patterns: [
-      /^\/(compras?|notas?|briefing|tarefa|lembrete|lembretes|lista|agenda|memo|carolina|ergonomia|transito|combustiveis|farmacias)\b/i,
+      /^\/(compras?|notas?|briefing|tarefa|lembrete|lembretes|lista|agenda|memo|carolina|ergonomia|transito|combustiveis?|gasoleo|gasolina|farmacias?|emails?|email|correio|inbox|ler_email|resumo_email|email_status|pesquisa|procura|web|google)\b/i,
+      /\b(emails?|gmail|inbox|correio|mensagens?|ler\s+emails?|resumo\s+de\s+emails?|ver\s+emails?)\b/i,
+      /\b(combust[ií]veis?|gas[oó]leo|gasolina|postos?\s+mais\s+baratos?|pre[cç]os?\s+dos?\s+combust[ií]veis?|onde\s+abastecer)\b/i,
+      /\b(tr[aâ]nsito|tr[aâ]fego|condicionamentos?|a4|ip4|t[uú]nel\s+do\s+mar[aã]o|estradas?)\b/i,
+      /\b(pesquisar?|procurar?|pesquisa\s+na\s+internet|procurar?\s+na\s+net|buscar?\s+na\s+web)\b/i,
       /\b(comprar|compras|lista\s+de\s+compras|supermercado|nota|notas|briefing|tarefa|tarefas|lembrete|lembretes|agenda|memo|recados?|carolina|escola|falta|consulta|pediatra|ergonomia|postura|sa[uú]de)\b/i,
     ],
   },

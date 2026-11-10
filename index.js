@@ -281,7 +281,7 @@ async function rotear(ctx, text) {
     return await safeExecute(() => handleDev(trimmed, ctx), 'Dev (Engenharia)', 20000);
   }
 
-  if (/^\/(avaliacao|avaliac[aã]o|immo|imovel|radar|relatorio_imoveis|relatorio|sites_immo|alertas_immo|pesquisar_imoveis)\b/i.test(trimmed)) {
+  if (/^\/(avaliacao|avaliac[aã]o|immo|imovel|radar|relatorio_imoveis|relatorio|sites_immo|alertas_immo|pesquisar_imoveis|moradias?_novas?|moradias?)\b/i.test(trimmed)) {
     return await safeExecute(() => handleImmo(trimmed, ctx), 'Immo (Avaliação & Radar)', 20000);
   }
 
@@ -289,7 +289,7 @@ async function rotear(ctx, text) {
     return await safeExecute(() => handleNutricao(trimmed, ctx), 'Nutrição (High-Protein)', 20000);
   }
 
-  if (/^\/(compras?|tarefas?|carolina|lembrete|notas?|briefing)\b/i.test(trimmed)) {
+  if (/^\/(compras?|tarefas?|carolina|lembrete|notas?|briefing|emails?|email|correio|inbox|ler_email|resumo_email|email_status|combust[ií]veis?|gasoleo|gasolina|gas[oó]leo|transito|tr[aâ]nsito|pesquisa|procura|web|farmacias?)\b/i.test(trimmed)) {
     return await safeExecute(() => handleGeral(trimmed, ctx), 'Pessoal & Família', 20000);
   }
 
@@ -298,6 +298,10 @@ async function rotear(ctx, text) {
   if (intent === 'IMMO') {
     log.info('[Master] Roteamento por intenção natural para IMMO', { text: trimmed.substring(0, 60) });
     return await safeExecute(() => handleImmo(trimmed, ctx), 'Immo (Radar & Avaliação)', 20000);
+  }
+  if (intent === 'GERAL') {
+    log.info('[Master] Roteamento por intenção natural para GERAL', { text: trimmed.substring(0, 60) });
+    return await safeExecute(() => handleGeral(trimmed, ctx), 'Pessoal & Família', 20000);
   }
   if (intent === 'NUTRICAO') {
     log.info('[Master] Roteamento por intenção natural para NUTRICAO', { text: trimmed.substring(0, 60) });
@@ -471,6 +475,47 @@ bot.command('briefing', async (ctx) => {
   await ctx.sendChatAction('typing');
   const resp = await safeExecute(() => handleGeral('/briefing'), 'Briefing', 8000);
   await sendReply(ctx, resp, getMasterKeyboard());
+});
+
+bot.command(['emails', 'email', 'correio', 'inbox'], async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const resp = await safeExecute(() => handleGeral('/emails', ctx), 'Emails IMAP', 20000);
+  await sendReply(ctx, resp);
+});
+
+bot.command(['ler_email', 'resumo_email'], async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const resp = await safeExecute(() => handleGeral(ctx.message.text, ctx), 'Resumo de Email', 20000);
+  await sendReply(ctx, resp);
+});
+
+bot.command('email_status', async (ctx) => {
+  const resp = await handleGeral('/email_status', ctx);
+  await sendReply(ctx, resp);
+});
+
+bot.command(['combustiveis', 'gasoleo', 'gasolina'], async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const resp = await safeExecute(() => handleGeral(ctx.message.text, ctx), 'Combustíveis DGEG', 15000);
+  await sendReply(ctx, resp);
+});
+
+bot.command(['transito', 'trajeto'], async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const resp = await safeExecute(() => handleGeral(ctx.message.text, ctx), 'Trânsito', 15000);
+  await sendReply(ctx, resp);
+});
+
+bot.command(['pesquisa', 'procura', 'web'], async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const resp = await safeExecute(() => handleGeral(ctx.message.text, ctx), 'Pesquisa Web', 20000);
+  await sendReply(ctx, resp);
+});
+
+bot.command(['moradias_novas', 'moradias'], async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const resp = await safeExecute(() => handleImmo('/moradias_novas', ctx), 'Moradias Novas', 25000);
+  await sendReply(ctx, resp);
 });
 
 bot.command('rota', async (ctx) => {
@@ -1354,11 +1399,41 @@ if (PESSOAL_TOKEN && PESSOAL_TOKEN.trim()) {
   }).catch(() => {});
 
   botPessoal.start(async (ctx) => {
-    await sendReply(ctx, `📋 *Assistente Familiar & Produtividade!*\n\nSincronizado diretamente com a tua Mini App no Telegram.\n\n• \`/compras\` — Ver ou gerir compras\n• \`/tarefas\` — Tarefas domésticas e pessoais\n• \`/carolina\` — Escola, faltas e consultas\n• \`/briefing\` — Resumo diário de compromissos`, Markup.inlineKeyboard([
-      [Markup.button.webApp('🏡 Abrir Mini App Família', VERCEL_APPS.familiar.url)],
-      [Markup.button.callback('🛒 Lista de Compras', 'pessoal_compras'), Markup.button.callback('📋 Tarefas da Casa', 'pessoal_tarefas')],
-      [Markup.button.callback('👧 Carolina (Escola/Saúde)', 'pessoal_carolina'), Markup.button.callback('☀️ Briefing do Dia', 'pessoal_briefing')]
-    ]));
+    await sendReply(
+      ctx,
+      `📋 *Assistente Pessoal Executivo & Familiar!*\n\n` +
+      `Sincronizado diretamente com a tua Mini App e serviços essenciais:\n\n` +
+      `📧 \`/emails\` — Ler emails recentes e resumos por IA\n` +
+      `🔍 \`/pesquisa\` — Pesquisar na Web ao vivo\n` +
+      `🏡 \`/moradias_novas\` — Radar de moradias nas plataformas\n` +
+      `⛽ \`/combustiveis\` — Postos mais baratos em Amarante (DGEG)\n` +
+      `🚗 \`/transito\` — Trânsito na A4 e Túnel do Marão\n` +
+      `🛒 \`/compras\` — Ver ou gerir compras\n` +
+      `📋 \`/tarefas\` — Tarefas domésticas e pessoais\n` +
+      `👧 \`/carolina\` — Escola, faltas e consultas\n` +
+      `☀️ \`/briefing\` — Resumo diário consolidado\n\n` +
+      `_Podes também falar normalmente comigo em português!_`,
+      Markup.inlineKeyboard([
+        [Markup.button.webApp('🏡 Abrir Mini App Família', VERCEL_APPS.familiar.url)],
+        [Markup.button.callback('📧 Ver Emails', 'pessoal_emails'), Markup.button.callback('⛽ Combustíveis', 'pessoal_combustiveis')],
+        [Markup.button.callback('🛒 Compras', 'pessoal_compras'), Markup.button.callback('📋 Tarefas', 'pessoal_tarefas')],
+        [Markup.button.callback('👧 Carolina', 'pessoal_carolina'), Markup.button.callback('☀️ Briefing do Dia', 'pessoal_briefing')]
+      ])
+    );
+  });
+
+  botPessoal.action('pessoal_emails', async (ctx) => {
+    await ctx.answerCbQuery('A carregar emails...');
+    await ctx.sendChatAction('typing');
+    const resp = await safeExecute(() => handleGeral('/emails', ctx), 'Emails IMAP', 20000);
+    await sendReply(ctx, resp);
+  });
+
+  botPessoal.action('pessoal_combustiveis', async (ctx) => {
+    await ctx.answerCbQuery('A consultar DGEG...');
+    await ctx.sendChatAction('typing');
+    const resp = await safeExecute(() => handleGeral('/combustiveis', ctx), 'Combustíveis', 15000);
+    await sendReply(ctx, resp);
   });
 
   botPessoal.action('pessoal_compras', async (ctx) => {
@@ -1387,6 +1462,47 @@ if (PESSOAL_TOKEN && PESSOAL_TOKEN.trim()) {
   });
 
   botPessoal.on('photo', (ctx) => processPhotoWithVision(ctx, PESSOAL_TOKEN, 'pessoal'));
+
+  botPessoal.command(['emails', 'email', 'correio', 'inbox'], async (ctx) => {
+    await ctx.sendChatAction('typing');
+    const resp = await safeExecute(() => handleGeral('/emails', ctx), 'Emails IMAP', 20000);
+    await sendReply(ctx, resp);
+  });
+
+  botPessoal.command(['ler_email', 'resumo_email'], async (ctx) => {
+    await ctx.sendChatAction('typing');
+    const resp = await safeExecute(() => handleGeral(ctx.message.text, ctx), 'Resumo Email', 20000);
+    await sendReply(ctx, resp);
+  });
+
+  botPessoal.command('email_status', async (ctx) => {
+    const resp = await handleGeral('/email_status', ctx);
+    await sendReply(ctx, resp);
+  });
+
+  botPessoal.command(['combustiveis', 'gasoleo', 'gasolina'], async (ctx) => {
+    await ctx.sendChatAction('typing');
+    const resp = await safeExecute(() => handleGeral(ctx.message.text, ctx), 'Combustíveis DGEG', 15000);
+    await sendReply(ctx, resp);
+  });
+
+  botPessoal.command(['transito'], async (ctx) => {
+    await ctx.sendChatAction('typing');
+    const resp = await safeExecute(() => handleGeral(ctx.message.text, ctx), 'Trânsito', 15000);
+    await sendReply(ctx, resp);
+  });
+
+  botPessoal.command(['pesquisa', 'procura', 'web'], async (ctx) => {
+    await ctx.sendChatAction('typing');
+    const resp = await safeExecute(() => handleGeral(ctx.message.text, ctx), 'Pesquisa Web', 20000);
+    await sendReply(ctx, resp);
+  });
+
+  botPessoal.command(['moradias_novas', 'moradias', 'imoveis'], async (ctx) => {
+    await ctx.sendChatAction('typing');
+    const resp = await safeExecute(() => handleGeral('/moradias_novas', ctx), 'Moradias Novas', 25000);
+    await sendReply(ctx, resp);
+  });
 
   botPessoal.command(['nutricao', 'dieta'], async (ctx) => {
     const resp = await handleGeral('/nutricao');

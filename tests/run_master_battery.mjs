@@ -97,6 +97,16 @@ async function main() {
     assert(intent === 'GERAL', `Esperado GERAL, obtido ${intent}`);
   });
 
+  await runTest('ROT-06', 'Roteamento de pedido de email em linguagem natural para GERAL', () => {
+    const intent = detectIntent('lê os meus emails e faz um resumo');
+    assert(intent === 'GERAL', `Esperado GERAL, obtido ${intent}`);
+  });
+
+  await runTest('ROT-07', 'Roteamento de combustíveis em linguagem natural para GERAL', () => {
+    const intent = detectIntent('postos de combustíveis mais baratos em amarante');
+    assert(intent === 'GERAL', `Esperado GERAL, obtido ${intent}`);
+  });
+
   // ─── MÓDULO 3: IA Determinística & Temperatura 0.0 (Zero Alucinações) ─────
   console.log(`\n🧠 MÓDULO 3: IA Determinística & Temperatura 0.0`);
 
