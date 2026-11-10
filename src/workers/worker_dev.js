@@ -98,8 +98,11 @@ export async function handle(text, ctx = {}) {
     return await askAgent({ chatId, workerTag: 'dev', prompt: '/reset' });
   }
 
-  // Controlo Remoto do PC Surface
-  if (/^\/(print|screenshot|ecra|ecrã)\b/.test(lower)) {
+  // Controlo Remoto do PC Surface (comandos e voz natural via Whisper)
+  const isPrint = /^\/(print|screenshot|ecra|ecrã)\b/i.test(lower) ||
+                  /\b(tira|tirar|faz|fazer)?\s*(um\s*)?(print|screenshot|foto do ecr[aã]|captura de ecr[aã])\b/i.test(lower);
+
+  if (isPrint) {
     try {
       if (ctx.sendChatAction) await ctx.sendChatAction('upload_photo');
     } catch {}
@@ -107,21 +110,24 @@ export async function handle(text, ctx = {}) {
     if (res.imageBase64 && ctx.replyWithPhoto) {
       await ctx.replyWithPhoto(
         { source: Buffer.from(res.imageBase64, 'base64') },
-        { caption: '🖥️ *Screenshot do teu PC Surface*\n_Capturado em direto via ponte remota Windows._', parse_mode: 'Markdown' }
+        { caption: '🖥️ *Screenshot do teu PC Surface*\n_Capturado em direto por comando de voz/texto._', parse_mode: 'Markdown' }
       );
       return '';
     }
     return res.output || '⚠️ Falha ao capturar ecrã do PC.';
   }
 
-  if (/^\/(pc|pc_status|hardware|pc_sistema)\b/.test(lower)) {
+  const isPcStatus = /^\/(pc|pc_status|hardware|pc_sistema)\b/i.test(lower) ||
+                     /\b(estado do pc|como est[aá] o pc|status do pc|mem[oó]ria do pc|carga do pc)\b/i.test(lower);
+
+  if (isPcStatus) {
     const res = await pcRemoteBridge.executeOnPc({ orderText: '/pc', chatId, timeoutMs: 12000 });
     return res.output || '⚠️ PC Surface não respondeu.';
   }
 
-  if (/^\/(compilar|build)\b/.test(lower)) {
-    const proj = text.replace(/^\/(compilar|build)\s*/i, '').trim();
-    if (!proj) return '💡 *Como compilar:* `/compilar NomeDoProjeto`\nExemplo: `/compilar matchpro`';
+  const compilarMatch = lower.match(/^(?:\/)?(?:compilar?|build|gerar?\s+o?\s*apk(?:\s+do)?)\s+([a-zA-Z0-9_-]+)/i);
+  if (compilarMatch) {
+    const proj = compilarMatch[1];
     const res = await pcRemoteBridge.executeOnPc({ orderText: `/compilar ${proj}`, chatId, timeoutMs: 90000 });
     return res.output || '⚠️ Falha na compilação remota.';
   }
