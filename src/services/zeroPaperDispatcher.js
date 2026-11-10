@@ -75,7 +75,7 @@ export async function classifyInput(rawText) {
           system_instruction: { parts: [{ text: DISPATCH_SYSTEM_PROMPT }] },
           generationConfig: {
             response_mime_type: 'application/json',
-            temperature: 0.1
+            temperature: 0.0
           }
         };
 
@@ -110,7 +110,7 @@ export async function classifyInput(rawText) {
               { role: 'user', content: text }
             ],
             response_format: { type: 'json_object' },
-            temperature: 0.1
+            temperature: 0.0
           },
           {
             headers: { Authorization: `Bearer ${GROQ_API_KEY}` },

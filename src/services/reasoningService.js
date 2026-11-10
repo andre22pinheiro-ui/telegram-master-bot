@@ -95,9 +95,9 @@ async function callGemini(chatId, workerTag, prompt, extraContext = '') {
     },
     contents,
     generationConfig: {
-      temperature: 0.5,
+      temperature: 0.0,
       maxOutputTokens: 1400,
-      topP: 0.95
+      topP: 0.1
     }
   };
 
@@ -151,7 +151,7 @@ async function callGroqFallback(chatId, workerTag, prompt, extraContext = '') {
       const payload = {
         model,
         messages,
-        temperature: 0.5,
+        temperature: 0.0,
         max_tokens: 850
       };
 
@@ -202,7 +202,7 @@ async function callOpenRouterFallback(chatId, workerTag, prompt, extraContext = 
       const res = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
         model,
         messages,
-        temperature: 0.5,
+        temperature: 0.0,
         max_tokens: 850
       }, {
         headers: {
