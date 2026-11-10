@@ -23,7 +23,13 @@ import { handleFamilyApi } from './src/shared/familyRoutes.js';
 import { analyzeImageBuffer, downloadTelegramPhoto } from './src/shared/multimodalVision.js';
 import { uploadToCloudinary } from './src/shared/cloudinaryCdn.js';
 import { safeExecute } from './src/utils/resilience.js';
-import { cleanChatMiddleware } from './src/shared/security.js';
+import { 
+  authMiddleware, 
+  cleanChatMiddleware, 
+  addAuthorizedId, 
+  removeAuthorizedId, 
+  listAuthorized 
+} from './src/shared/security.js';
 import { 
   getTvCockpit, 
   searchChannels, 
@@ -67,19 +73,8 @@ if (!CHAT_ID_AUTORIZADO) {
 // Garantir diretoria de logs
 try { mkdirSync('./logs', { recursive: true }); } catch {}
 
-// ─── Middleware de Autenticação Partilhado ────────────────────────────────────
-
-const authMiddleware = async (ctx, next) => {
-  const chatId = String(ctx.chat?.id || '');
-  const userId = String(ctx.from?.id || '');
-
-  if (chatId !== CHAT_ID_AUTORIZADO && userId !== CHAT_ID_AUTORIZADO) {
-    log.warn('Acesso não autorizado bloqueado', { chatId, userId });
-    await ctx.reply('⛔ Acesso restrito ao proprietário do sistema.');
-    return;
-  }
-  return next();
-};
+// ─── Middleware de Autenticação e Segurança (Dois Contactos Autorizados) ──────
+// authMiddleware importado diretamente de ./src/shared/security.js
 
 // ─── Teclados Interativos Partilhados ─────────────────────────────────────────
 
@@ -539,6 +534,45 @@ bot.command(['noticias', 'noticia', 'news', 'europa'], async (ctx) => {
     [Markup.button.callback('🔄 Atualizar Notícias', 'act_noticias')],
     [Markup.button.callback('🎛️ Menu Principal', 'act_main_menu')]
   ]));
+});
+
+// Comandos de Gestão de Segurança (Dois Contactos Autorizados)
+bot.command('autorizados', async (ctx) => {
+  const data = listAuthorized();
+  let msg = `🔒 *Gestão de Segurança dos Bots:*\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  msg += `📞 *Contactos Telefónicos Autorizados:*\n`;
+  msg += `• \`+351 919 115 655\` (André Pinheiro)\n`;
+  msg += `• \`+351 933 276 221\` (Contacto Autorizado 2)\n\n`;
+  msg += `👥 *IDs Telegram Registados (${data.authorizedUserIds.length}):*\n`;
+  data.authorizedUserIds.forEach(id => {
+    const phone = data.phoneMapping[id] || 'Automático';
+    msg += `• ID: \`${id}\` — _${phone}_\n`;
+  });
+  msg += `\n_Para associar um novo Telegram por ID: \`/autorizar <id> [telefone]\`_\n_Para revogar acesso: \`/bloquear <id>\`_`;
+  await sendReply(ctx, msg);
+});
+
+bot.command('autorizar', async (ctx) => {
+  const parts = ctx.message.text.replace(/^\/autorizar\s*/i, '').trim().split(/\s+/);
+  const targetId = parts[0];
+  const label = parts[1] || 'manual';
+  if (!targetId) {
+    return await sendReply(ctx, 'ℹ️ Formato: `/autorizar <telegram_id> [telefone]`');
+  }
+  addAuthorizedId(targetId, label);
+  await sendReply(ctx, `✅ ID Telegram \`${targetId}\` adicionado à lista de autorizados!`);
+});
+
+bot.command('bloquear', async (ctx) => {
+  const targetId = ctx.message.text.replace(/^\/bloquear\s*/i, '').trim();
+  if (!targetId) {
+    return await sendReply(ctx, 'ℹ️ Formato: `/bloquear <telegram_id>`');
+  }
+  if (targetId === String(CHAT_ID_AUTORIZADO)) {
+    return await sendReply(ctx, '❌ Não é permitido bloquear o ID do proprietário principal.');
+  }
+  removeAuthorizedId(targetId);
+  await sendReply(ctx, `🚫 ID Telegram \`${targetId}\` revogado e bloqueado com sucesso.`);
 });
 
 // Ações de Callback dos Botões Inline no Master
