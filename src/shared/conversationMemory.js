@@ -48,7 +48,14 @@ class ConversationMemory {
       for (const [key, session] of this.sessions.entries()) {
         obj[key] = session;
       }
-      fs.writeFileSync(HISTORY_FILE, JSON.stringify(obj, null, 2), 'utf-8');
+      const tmpPath = `${HISTORY_FILE}.tmp`;
+      fs.writeFileSync(tmpPath, JSON.stringify(obj, null, 2), 'utf-8');
+      fs.renameSync(tmpPath, HISTORY_FILE);
+
+      // Sincronizar periodicamente com o Google Drive após alterações de conversa
+      import('../services/googleDriveService.js')
+        .then(m => m.triggerDebouncedDriveSync?.(30000))
+        .catch(() => {});
     } catch (err) {
       log.error('Erro ao guardar histórico de conversas no disco:', err.message);
     }

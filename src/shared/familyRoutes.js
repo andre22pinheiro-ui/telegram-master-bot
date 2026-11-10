@@ -1,16 +1,30 @@
 // src/shared/familyRoutes.js — Rotas REST para sincronização com a Mini App Gestão Familiar
 import { familyDb } from './familyDb.js';
+import { validateTelegramWebAppData } from './telegramAuth.js';
 
 export function handleFamilyApi(req, res, urlPath, method) {
   // Configurar CORS para permitir que a Mini App em gestao-familiar-webapp.vercel.app consuma a API
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-requested-with');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-requested-with, x-telegram-init-data');
 
   if (method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
     return true;
+  }
+
+  // Validação Criptográfica opcional/reforçada com Telegram WebApp initData
+  const initData = req.headers['x-telegram-init-data'] || 
+    (req.headers['authorization']?.startsWith('tma ') ? req.headers['authorization'].slice(4) : null);
+
+  if (initData) {
+    const authResult = validateTelegramWebAppData(initData);
+    if (!authResult.valid) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Acesso Proibido', reason: authResult.reason }));
+      return true;
+    }
   }
 
   // ─── 1. COMPRAS (/api/family/shopping) ──────────────────────────────────

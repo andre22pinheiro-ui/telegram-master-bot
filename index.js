@@ -23,7 +23,7 @@ import { handleFamilyApi } from './src/shared/familyRoutes.js';
 import { analyzeImageBuffer, downloadTelegramPhoto } from './src/shared/multimodalVision.js';
 import { uploadToCloudinary } from './src/shared/cloudinaryCdn.js';
 import { transcribeTelegramAudio } from './src/shared/whisperAudio.js';
-import { safeExecute } from './src/utils/resilience.js';
+import { safeExecute, withTypingHeartbeat } from './src/utils/resilience.js';
 import { 
   authMiddleware, 
   cleanChatMiddleware, 
@@ -901,8 +901,7 @@ bot.on('text', async (ctx) => {
   if (!text || text.trim().length === 0) return;
   log.info('[Master] Mensagem recebida', { from: ctx.from?.first_name, text: text.substring(0, 80) });
   try {
-    await ctx.sendChatAction('typing');
-    const resposta = await rotear(ctx, text);
+    const resposta = await withTypingHeartbeat(ctx, () => rotear(ctx, text));
     if (resposta) {
       await sendReply(ctx, resposta);
     }
@@ -923,8 +922,7 @@ const handleMasterVoice = async (ctx) => {
       return;
     }
     await ctx.reply(`🎙️ _"${result.text}"_`, { parse_mode: 'Markdown' }).catch(() => {});
-    await ctx.sendChatAction('typing');
-    const resposta = await rotear(ctx, result.text);
+    const resposta = await withTypingHeartbeat(ctx, () => rotear(ctx, result.text));
     if (resposta) {
       await sendReply(ctx, resposta);
     }

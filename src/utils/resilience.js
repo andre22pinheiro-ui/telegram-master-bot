@@ -67,3 +67,28 @@ export async function safeExecute(
   }
 }
 
+/**
+ * Mantém o indicador visual de escrita ('typing') ativo no Telegram a cada 4 segundos
+ * enquanto uma operação mais demorada (IA, scraping ou cálculo de rotas) está a decorrer.
+ *
+ * @param {object} ctx - Contexto Telegraf
+ * @param {() => Promise<any>} asyncFn - Tarefa assíncrona
+ * @param {number} intervalMs - Intervalo de batimento cardíaco (padrão: 4000ms)
+ */
+export async function withTypingHeartbeat(ctx, asyncFn, intervalMs = 4000) {
+  if (!ctx || !ctx.sendChatAction) {
+    return asyncFn();
+  }
+
+  await ctx.sendChatAction('typing').catch(() => {});
+  const timer = setInterval(() => {
+    ctx.sendChatAction('typing').catch(() => {});
+  }, intervalMs);
+
+  try {
+    return await asyncFn();
+  } finally {
+    clearInterval(timer);
+  }
+}
+
