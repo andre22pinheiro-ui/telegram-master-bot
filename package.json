@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
+    "test": "node tests/run_master_battery.mjs",
     "pm2:start": "pm2 start ecosystem.config.cjs",
     "pm2:stop": "pm2 stop telegram-master-bot",
     "pm2:restart": "pm2 restart telegram-master-bot",

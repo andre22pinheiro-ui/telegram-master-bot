@@ -22,9 +22,9 @@ const INTENT_PATTERNS = [
   {
     intent: 'IMMO',
     patterns: [
-      /^\/(immo|imovel|imóvel|avaliac[aã]o|avaliacao|radar|pesquisar_imoveis|relatorio_imoveis|sites_immo|alertas_immo)\b/i,
-      /\b(imov[eé]l|imóveis|imoveis|imobi[lh]i[aá]rio|avaliac[aã]o|avalia|m2|metro quadrado|amarante|casa|apartamento|terreno|moradia|habita[cç][aã]o|comprar\s+casa|vender\s+casa)\b/i,
-      /\b(rever\s+an[uú]ncios|an[uú]ncios\s+diariamente|pesquisas?\s+durante\s+o\s+dia|alertas?\s+de\s+im[oó]veis|relat[oó]rio\s+de\s+im[oó]veis|novos\s+im[oó]veis|radar\s+imobili[aá]rio)\b/i,
+      /^\/(immo|imovel|imóvel|avaliac[aã]o|avaliacao|radar|pesquisar_imoveis|relatorio_imoveis|sites_immo|alertas_immo|moradias?_novas?)\b/i,
+      /\b(imov[eé]l|imóveis|imoveis|imobi[lh]i[aá]rio|avaliac[aã]o|avalia|m2|metro quadrado|amarante|casas?|apartamentos?|terrenos?|moradias?|habita[cç][aã]o|comprar\s+casa|vender\s+casa)\b/i,
+      /\b(rever\s+an[uú]ncios|an[uú]ncios\s+diariamente|pesquisas?\s+durante\s+o\s+dia|alertas?\s+de\s+im[oó]veis|relat[oó]rio\s+de\s+im[oó]veis|novos\s+im[oó]veis|radar\s+imobili[aá]rio|moradias?\s+novas?)\b/i,
       /\b(pesquisa-imobiliario|immoeval|cmvm)\b/i,
     ],
   },
@@ -44,17 +44,17 @@ const INTENT_PATTERNS = [
     ],
   },
   {
-    intent: 'NUTRICAO',
+    intent: 'GERAL',
     patterns: [
-      /^\/(nutricao|dieta|macros?|calorias?|proteina|agua|creatina|refeic[aã]o|refeicoes|receita|alimento|hoje|status)\b/i,
-      /\b(nutri[cç][aã]o|dieta|macros?|calorias?|prote[ií]na|creatina|refei[cç][aã]o|refei[cç][oõ]es|almo[cç]o|jantar|pequeno[- ]almo[cç]o|lanche|receita|shake|cottage|lombo|air[- ]?fryer|continente|pingo\s*doce|lidl|mercadona|auchan|comer)\b/i,
+      /^\/(compras?|notas?|briefing|tarefa|lembrete|lembretes|lista|agenda|memo|carolina|ergonomia|transito|combustiveis|farmacias)\b/i,
+      /\b(comprar|compras|lista\s+de\s+compras|supermercado|nota|notas|briefing|tarefa|tarefas|lembrete|lembretes|agenda|memo|recados?|carolina|escola|falta|consulta|pediatra|ergonomia|postura|sa[uú]de)\b/i,
     ],
   },
   {
-    intent: 'GERAL',
+    intent: 'NUTRICAO',
     patterns: [
-      /^\/(compras?|notas?|briefing|tarefa|lembrete|lembretes|lista|agenda|memo|carolina|ergonomia)\b/i,
-      /\b(comprar|compras|lista|supermercado|nota|notas|briefing|tarefa|tarefas|lembrete|lembretes|agenda|memo|recados?|carolina|escola|falta|consulta|pediatra|ergonomia|postura|sa[uú]de)\b/i,
+      /^\/(nutricao|dieta|macros?|calorias?|proteina|agua|creatina|refeic[aã]o|refeicoes|receita|alimento|hoje|status)\b/i,
+      /\b(nutri[cç][aã]o|dieta|macros?|calorias?|prote[ií]na|creatina|refei[cç][aã]o|refei[cç][oõ]es|almo[cç]o|jantar|pequeno[- ]almo[cç]o|shake|cottage|lombo|air[- ]?fryer|comer)\b/i,
     ],
   },
 ];

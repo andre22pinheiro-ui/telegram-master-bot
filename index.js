@@ -25,6 +25,7 @@ import { uploadToCloudinary } from './src/shared/cloudinaryCdn.js';
 import { transcribeTelegramAudio } from './src/shared/whisperAudio.js';
 import { pcRemoteBridge } from './src/services/pcRemoteBridge.js';
 import { safeExecute, withTypingHeartbeat } from './src/utils/resilience.js';
+import { sanitizeTelegramMarkdown } from './src/utils/markdownSanitizer.js';
 import { tryAutoDispatch } from './src/services/zeroPaperDispatcher.js';
 import appFrotaService from './src/services/appFrotaService.js';
 import { 
@@ -147,8 +148,9 @@ async function sendReply(ctx, text, extra = null) {
   for (let i = 0; i < chunks.length; i++) {
     const isLast = i === chunks.length - 1;
     const opts = isLast && extra ? extra : undefined;
+    const cleanChunk = sanitizeTelegramMarkdown(chunks[i]);
     try {
-      await ctx.replyWithMarkdown(chunks[i], opts);
+      await ctx.replyWithMarkdown(cleanChunk, opts);
     } catch (mdErr) {
       log.warn('Markdown parse falhou no Telegram, a enviar em texto simples:', mdErr?.message);
       try {
