@@ -70,39 +70,62 @@ export async function fetchRecentEmails(max = 5, unreadOnly = false) {
     const lock = await client.getMailboxLock('INBOX');
 
     try {
-      // Procura por não lidos ou pelas mensagens mais recentes
-      const searchCriteria = unreadOnly ? { unseen: true } : { all: true };
-      const messages = await client.search(searchCriteria, { uid: true });
+      const total = client.mailbox.exists || 0;
 
-      if (messages && messages.length > 0) {
-        // Obter os últimos N emails (os mais recentes estão no fim da lista)
-        const recentUids = messages.slice(-max).reverse();
+      if (unreadOnly) {
+        // Procura apenas por mensagens não lidas
+        const unseenUids = await client.search({ unseen: true }, { uid: true });
+        if (unseenUids && unseenUids.length > 0) {
+          const targetUids = unseenUids.slice(-max).reverse();
+          for (const uid of targetUids) {
+            const fetched = await client.fetchOne(uid, {
+              envelope: true,
+              source: true,
+              internalDate: true,
+              flags: true
+            });
+            if (fetched && fetched.source) {
+              const parsed = await simpleParser(fetched.source);
+              emails.push({
+                uid,
+                messageId: parsed.messageId || String(uid),
+                from: parsed.from?.text || parsed.from?.value?.[0]?.address || 'Desconhecido',
+                fromAddress: parsed.from?.value?.[0]?.address || '',
+                fromName: parsed.from?.value?.[0]?.name || '',
+                to: parsed.to?.text || '',
+                subject: parsed.subject || '(Sem Assunto)',
+                date: parsed.date || fetched.internalDate,
+                text: parsed.text ? parsed.text.trim().slice(0, 3000) : '',
+                isUnread: true
+              });
+            }
+          }
+        }
+      } else if (total > 0) {
+        // Busca direta de alta velocidade pela sequência dos últimos N emails
+        const fromSeq = Math.max(1, total - max + 1);
+        const toSeq = total;
 
-        for (const uid of recentUids) {
-          const fetched = await client.fetchOne(uid, {
-            envelope: true,
-            source: true,
-            internalDate: true,
-            flags: true
-          });
-
-          if (fetched && fetched.source) {
-            const parsed = await simpleParser(fetched.source);
-
+        for await (const msg of client.fetch(`${fromSeq}:${toSeq}`, { envelope: true, source: true, flags: true })) {
+          if (msg && msg.source) {
+            const parsed = await simpleParser(msg.source);
             emails.push({
-              uid,
-              messageId: parsed.messageId || String(uid),
+              uid: msg.uid,
+              seq: msg.seq,
+              messageId: parsed.messageId || String(msg.uid),
               from: parsed.from?.text || parsed.from?.value?.[0]?.address || 'Desconhecido',
               fromAddress: parsed.from?.value?.[0]?.address || '',
               fromName: parsed.from?.value?.[0]?.name || '',
               to: parsed.to?.text || '',
               subject: parsed.subject || '(Sem Assunto)',
-              date: parsed.date || fetched.internalDate,
+              date: parsed.date || msg.internalDate,
               text: parsed.text ? parsed.text.trim().slice(0, 3000) : '',
-              isUnread: fetched.flags ? !fetched.flags.has('\\Seen') : true
+              isUnread: msg.flags ? !msg.flags.has('\\Seen') : false
             });
           }
         }
+        // Inverter para que o mais recente fique na posição 0 (#1 para o utilizador)
+        emails.reverse();
       }
     } finally {
       lock.release();
@@ -215,3 +238,4 @@ export default {
   summarizeEmailWithAI,
   getEmailBriefing
 };
+
