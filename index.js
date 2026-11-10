@@ -1405,6 +1405,18 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, () => {
   log.info(`Servidor HTTP e API REST ativo na porta ${PORT} para Render.com e Mini Apps`);
+  
+  // Keep-Alive Automático para Render.com (Prevenir hibernação do plano gratuito)
+  const renderUrl = process.env.RENDER_EXTERNAL_URL || 'https://telegram-master-bot.onrender.com';
+  if (process.env.RENDER || process.env.NODE_ENV === 'production') {
+    setInterval(() => {
+      fetch(`${renderUrl}/health`)
+        .then(res => res.json())
+        .then(() => log.debug('Keep-alive ping com sucesso'))
+        .catch(() => {});
+    }, 10 * 60 * 1000);
+    log.info(`📡 Keep-Alive ativado para Render.com: ${renderUrl}/health a cada 10 min.`);
+  }
 });
 
 // ─── Arranque Paralelo de Todos os Bots Ativos ─────────────────────────────
