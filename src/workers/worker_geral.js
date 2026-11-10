@@ -3,6 +3,7 @@ import axios from 'axios';
 import { familyDb } from '../shared/familyDb.js';
 import { createLogger } from '../utils/logger.js';
 import { askAgent } from '../services/reasoningService.js';
+import { searchLiveWeb } from '../shared/webSearch.js';
 
 const log = createLogger('WorkerGeral');
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
@@ -376,6 +377,24 @@ export async function handle(text, ctx = {}) {
   if (/^\/(nota|notas)\b/i.test(trimmed)) {
     const args = trimmed.replace(/^\/(nota|notas)\s*/i, '').trim();
     return handleNotas(args);
+  }
+
+  if (/^\/(pesquisa|procura|web|google)\b/i.test(trimmed)) {
+    const query = trimmed.replace(/^\/(pesquisa|procura|web|google)\s*/i, '').trim();
+    if (!query) {
+      return `🔍 *Pesquisa na Internet*\n\nUsa: \`/pesquisa <termo>\`\n\n*Exemplos:*\n• \`/pesquisa previsão do tempo em Amarante\`\n• \`/pesquisa notícias sobre combustíveis em Portugal\`\n• \`/pesquisa horários farmácia Amarante\``;
+    }
+    const results = await searchLiveWeb(query, 4);
+    if (!results || results.length === 0) {
+      return `🔍 Não foram encontrados resultados recentes na Web para *"${query}"*.`;
+    }
+    let txt = `🌐 *Resultados da Pesquisa Web para:* _"${query}"_\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    results.forEach((r, idx) => {
+      txt += `*${idx + 1}. [${r.title}](${r.url})*\n`;
+      if (r.snippet) txt += `   ${r.snippet.slice(0, 150)}...\n\n`;
+    });
+    txt += `━━━━━━━━━━━━━━━━━━━━━━━━`;
+    return txt;
   }
 
   if (/^\/(lembrete|lembretes)\b/i.test(trimmed)) {

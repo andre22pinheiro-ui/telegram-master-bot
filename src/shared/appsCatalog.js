@@ -127,8 +127,20 @@ export function formatAllVercelAppsMarkdown() {
   );
 }
 
+export function getAppByKeyword(keyword) {
+  const clean = String(keyword || '').toLowerCase().trim();
+  const apps = Object.values(VERCEL_APPS);
+  return apps.find(a => 
+    a.name.toLowerCase().includes(clean) || 
+    a.id.toLowerCase().includes(clean) || 
+    a.description.toLowerCase().includes(clean) ||
+    clean.includes(a.id)
+  ) || null;
+}
+
 export default {
   VERCEL_APPS,
+  getAppByKeyword,
   buildTelegramAppsKeyboard,
   formatAllVercelAppsMarkdown
 };
