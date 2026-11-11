@@ -159,12 +159,9 @@ async function main() {
     await runTest('SEC-05', 'Render Blueprint e index.js implementam Cloud-Native sem PC local e isolamento Dual-Bot', () => {
       const renderYaml = fs.readFileSync(path.join(ROOT_DIR, 'render.yaml'), 'utf-8');
       assert(renderYaml.includes('name: telegram-master-bot'), 'render.yaml deve declarar serviço telegram-master-bot');
-      assert(renderYaml.includes('name: zeropaper-frota-bot'), 'render.yaml deve declarar serviço isolado zeropaper-frota-bot');
-      assert(renderYaml.includes('TELEGRAM_FROTAS_TOKEN'), 'render.yaml deve declarar TELEGRAM_FROTAS_TOKEN no serviço de frotas');
+      assert(!renderYaml.includes('name: zeropaper-frota-bot'), 'render.yaml do Master não deve duplicar o serviço zeropaper-frota-bot');
       assert(!renderYaml.includes('SYNC_SECRET_TOKEN'), 'render.yaml não deve conter SYNC_SECRET_TOKEN obsoleto');
-
-      const [masterYamlPart] = renderYaml.split('name: zeropaper-frota-bot');
-      assert(!masterYamlPart.includes('SUPABASE_'), 'Serviço pessoal telegram-master-bot não pode ter variáveis SUPABASE_');
+      assert(!renderYaml.includes('SUPABASE_'), 'Serviço pessoal telegram-master-bot não pode ter variáveis SUPABASE_');
 
       const indexSrc = fs.readFileSync(path.join(ROOT_DIR, 'index.js'), 'utf-8');
       assert(indexSrc.includes('/webhook/master'), 'index.js deve servir webhook /webhook/master');
@@ -870,10 +867,9 @@ async function main() {
       const yamlSrc = fs.readFileSync(path.join(ROOT_DIR, 'render.yaml'), 'utf-8');
       assert(
         yamlSrc.includes('telegram-master-bot-0h2h.onrender.com') &&
-          yamlSrc.includes('zeropaper-frota-bot.onrender.com') &&
-          yamlSrc.includes('zeropaper-frota-bot-0h2h.onrender.com') &&
+          !yamlSrc.includes('name: zeropaper-frota-bot') &&
           !yamlSrc.includes('17bj'),
-        'render.yaml deve mapear 0h2h (Master) e zeropaper-frota-bot (.onrender.com & -0h2h) sem 17bj obsoleto'
+        'render.yaml do Master deve gerir apenas telegram-master-bot (0h2h) sem duplicar zeropaper-frota-bot nem 17bj'
       );
     });
   } finally {

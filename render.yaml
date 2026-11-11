@@ -1,6 +1,6 @@
-# render.yaml — Arquitetura 100% Cloud-Native (Serviços Web Isolados no Render)
-# Serviço 1 (0h2h): telegram-master-bot (@AndrePinheirobot -> https://telegram-master-bot-0h2h.onrender.com) -> Pessoal & Familiar (SQLite WAL + Google Drive, ZERO Supabase)
-# Serviço 2 (Frota): zeropaper-frota-bot (@zeropaperfrotaBot -> https://zeropaper-frota-bot.onrender.com & https://zeropaper-frota-bot-0h2h.onrender.com) -> Trabalho & Frotas (Supabase AppFrota + ORS + CE 561/2006)
+# render.yaml — Arquitetura 100% Cloud-Native (Domínio Pessoal Isolado no Render)
+# Serviço Pessoal (0h2h): telegram-master-bot (@AndrePinheirobot -> https://telegram-master-bot-0h2h.onrender.com) -> Pessoal & Familiar (SQLite WAL + Google Drive, ZERO Supabase)
+# Nota: zeropaper-frota-bot tem o seu próprio render.yaml isolado em zeropaper-frota-bot.onrender.com; zeropaper-frota-bot-0h2h fica livre para reaproveitamento pessoal.
 
 services:
   - type: web
@@ -72,40 +72,3 @@ services:
         value: https://telegram-master-bot-0h2h.onrender.com
       - key: VERCEL_DEPLOY_HOOK_URL
         sync: false
-
-  - type: web
-    name: zeropaper-frota-bot
-    repo: https://github.com/andre22pinheiro-ui/zeropaper-frota-bot
-    branch: main
-    runtime: node
-    plan: free
-    region: frankfurt
-    buildCommand: npm install
-    startCommand: npm start
-    autoDeploy: true
-    healthCheckPath: /health
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: LOG_LEVEL
-        value: info
-      - key: TELEGRAM_FROTAS_TOKEN
-        sync: false
-      - key: TELEGRAM_WEBHOOK_SECRET
-        sync: false
-      - key: ADMIN_TELEGRAM_ID
-        value: "950415577"
-      - key: SUPABASE_URL
-        value: "https://bwibtpcunojmtnrnqpvg.supabase.co"
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: GROQ_API_KEY
-        sync: false
-      - key: ORS_API_KEY
-        sync: false
-      - key: APP_BASE_URL
-        value: "https://appfrota-ten.vercel.app"
-      - key: ROTABUS_WEB_URL
-        value: "https://smooth-bus-routes.vercel.app"

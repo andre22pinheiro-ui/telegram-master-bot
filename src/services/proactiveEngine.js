@@ -429,8 +429,7 @@ export function startProactiveEngine(
       if (process.env.RENDER || process.env.NODE_ENV === 'production' || process.env.RENDER_EXTERNAL_URL) {
         const targets = [
           `${String(keepAliveUrl).replace(/\/$/, '')}/health`,
-          'https://zeropaper-frota-bot.onrender.com/health',
-          'https://zeropaper-frota-bot-0h2h.onrender.com/health'
+          'https://zeropaper-frota-bot.onrender.com/health'
         ];
         for (const healthUrl of [...new Set(targets)]) {
           fetch(healthUrl, { signal: AbortSignal.timeout(4000) }).catch(() => {});
