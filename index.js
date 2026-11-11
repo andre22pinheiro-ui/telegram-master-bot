@@ -742,22 +742,24 @@ async function startMasterBot() {
   startAutoDriveSync(15);
 
   const renderUrl = process.env.RENDER_EXTERNAL_URL || process.env.WEBHOOK_BASE_URL;
-  await mountBotTransport({
-    name: '@AndrePinheirobot',
-    targetBot: bot,
-    webhookPath: '/webhook/master',
-    webhookCallbacks,
-    renderUrl
-  });
-  for (const bridge of legacyBridges) {
-    await mountBotTransport({
-      name: bridge.name,
-      targetBot: bridge.bot,
-      webhookPath: bridge.webhookPath,
+  await Promise.all([
+    mountBotTransport({
+      name: '@AndrePinheirobot',
+      targetBot: bot,
+      webhookPath: '/webhook/master',
       webhookCallbacks,
       renderUrl
-    });
-  }
+    }),
+    ...legacyBridges.map((bridge) =>
+      mountBotTransport({
+        name: bridge.name,
+        targetBot: bridge.bot,
+        webhookPath: bridge.webhookPath,
+        webhookCallbacks,
+        renderUrl
+      })
+    )
+  ]);
 
   // 3. Motor Proativo Unificado (node-cron Europe/Lisbon + Silêncio Noturno 22:30-07:30 + Lembretes 15s)
   startProactiveEngine(bot);
