@@ -427,9 +427,14 @@ export function startProactiveEngine(
         log.warn(`⚠️ Consumo de RAM elevado: ${rssMb}MB RSS (limite alerta ${checkRamThresholdMb}MB)`);
       }
       if (process.env.RENDER || process.env.NODE_ENV === 'production' || process.env.RENDER_EXTERNAL_URL) {
-        fetch(`${String(keepAliveUrl).replace(/\/$/, '')}/health`, {
-          signal: AbortSignal.timeout(4000)
-        }).catch(() => {});
+        const targets = [
+          `${String(keepAliveUrl).replace(/\/$/, '')}/health`,
+          'https://zeropaper-frota-bot.onrender.com/health',
+          'https://zeropaper-frota-bot-0h2h.onrender.com/health'
+        ];
+        for (const healthUrl of [...new Set(targets)]) {
+          fetch(healthUrl, { signal: AbortSignal.timeout(4000) }).catch(() => {});
+        }
       }
     },
     cronOpts

@@ -807,9 +807,9 @@ async function main() {
     });
 
     // =========================================================================
-    // 16. NOVOS SERVIÇOS INTEGRADOS (Self-Refine, Pladur, Lei PT, Agenda, OSM, 17bj)
+    // 16. NOVOS SERVIÇOS INTEGRADOS (Self-Refine, Pladur, Lei PT, Agenda, OSM, Render Frota)
     // =========================================================================
-    await runTest('SVC-01', 'Serviços Legacy Integrados (Self-Refine, Pladur, Direito Pessoal, Agenda, OSM Amarante, 17bj)', async () => {
+    await runTest('SVC-01', 'Serviços Legacy Integrados (Self-Refine, Pladur, Direito Pessoal, Agenda, OSM Amarante, Render Frota)', async () => {
       const mockCtx = { chat: { id: '950415577' }, from: { id: 950415577, first_name: 'André' } };
 
       const pladurOut = await workerDev.handle('/pladur 25', mockCtx);
@@ -868,7 +868,13 @@ async function main() {
         assert(idxSrc.includes(cmd), `index.js deve registar comando ${cmd}`);
       }
       const yamlSrc = fs.readFileSync(path.join(ROOT_DIR, 'render.yaml'), 'utf-8');
-      assert(yamlSrc.includes('telegram-master-bot-0h2h.onrender.com') && yamlSrc.includes('telegram-master-bot-17bj.onrender.com'), 'render.yaml deve mapear serviços 0h2h (Master) e 17bj (Frota)');
+      assert(
+        yamlSrc.includes('telegram-master-bot-0h2h.onrender.com') &&
+          yamlSrc.includes('zeropaper-frota-bot.onrender.com') &&
+          yamlSrc.includes('zeropaper-frota-bot-0h2h.onrender.com') &&
+          !yamlSrc.includes('17bj'),
+        'render.yaml deve mapear 0h2h (Master) e zeropaper-frota-bot (.onrender.com & -0h2h) sem 17bj obsoleto'
+      );
     });
   } finally {
     sqliteMasterDb.close();

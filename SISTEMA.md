@@ -2,7 +2,7 @@
 
 > **Documento Canónico — Arquitetura 100% Cloud-Native (Zero Dependência de PC Local)**  
 > **Serviço Pessoal Nuvem 24/7 (`0h2h`):** [`https://telegram-master-bot-0h2h.onrender.com`](https://telegram-master-bot-0h2h.onrender.com) (`@AndrePinheirobot`, `POST /webhook/master`, `:3000`)  
-> **Serviço Empresarial Nuvem 24/7 (`17bj` reaproveitado):** [`https://telegram-master-bot-17bj.onrender.com`](https://telegram-master-bot-17bj.onrender.com) (`@zeropaperfrotaBot`, repo `andre22pinheiro-ui/zeropaper-frota-bot`, `POST /webhook/frota`, `TELEGRAM_FROTAS_TOKEN`)  
+> **Serviços Empresariais Nuvem 24/7 (Frota):** [`https://zeropaper-frota-bot.onrender.com`](https://zeropaper-frota-bot.onrender.com) (`srv-dbqah556e07s73fj8550`) e réplica [`https://zeropaper-frota-bot-0h2h.onrender.com`](https://zeropaper-frota-bot-0h2h.onrender.com) (`srv-dbqah52jnfac73dbtrfg`) (`@zeropaperfrotaBot`, repo `andre22pinheiro-ui/zeropaper-frota-bot`, `POST /webhook/frota`, `TELEGRAM_FROTAS_TOKEN`)  
 > **Runtime:** Node.js ESM (`>=20.0.0`, Docker `node:20-alpine` no Render) | **Fuso Horário:** `Europe/Lisbon`
 
 ---
@@ -180,7 +180,7 @@ Whitelist estrita (`TRUSTED_SOURCES` verificada via `isTrustedSource(url)`):
 
 ## 7. Serviço Isolado de Trabalho (`zeropaper-frota-bot`)
 
-Localizado em [`c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot) (`@zeropaperfrotaBot`, servido em **`https://telegram-master-bot-17bj.onrender.com`** e declarado no [`render.yaml`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/render.yaml)):
+Localizado em [`c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot) (`@zeropaperfrotaBot`, servido em **`https://zeropaper-frota-bot.onrender.com`** / réplica **`https://zeropaper-frota-bot-0h2h.onrender.com`** e declarado no [`render.yaml`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/render.yaml)):
 - Endpoint dedicado **`POST /webhook/frota`** autenticado por **`TELEGRAM_FROTAS_TOKEN`** (`fleetWebhookTransport.js` com `getWebhookInfo`, backoff 429 e zero polling em nuvem) e `TELEGRAM_WEBHOOK_SECRET` opcional.
 - Persistência operacional isolada no **Supabase** (`AppFrota`), confirmação em 2 passos, idempotência SHA-256 e matriz RBAC por perfil.
 - [`src/services/routeService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot/src/services/routeService.js) + [`amaranteHeavyMapService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot/src/services/amaranteHeavyMapService.js): `/rota` (ORS `driving-hgv` + contexto OSM Amarante sem restrições inventadas) e `/tacografo` (CE 561/2006 & UE 165/2014 integrado com `evaluateDrivingLimitAlert`).
