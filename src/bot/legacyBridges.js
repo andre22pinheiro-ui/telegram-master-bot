@@ -348,6 +348,68 @@ export function createLegacyBridgeBots(deps, env = process.env) {
   return instances;
 }
 
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Monta transporte Webhook (com retry em 429 e sem fallback destrutivo na nuvem) ou Polling local.
+ */
+export async function mountBotTransport({
+  name,
+  targetBot,
+  webhookPath,
+  webhookCallbacks,
+  renderUrl,
+  usePolling = process.env.USE_POLLING === 'true',
+  isCloudEnv = Boolean(process.env.RENDER),
+  sleepFn = defaultSleep
+}) {
+  if (renderUrl && !usePolling) {
+    const webhookUrl = `${renderUrl.replace(/\/$/, '')}${webhookPath}`;
+    webhookCallbacks.set(webhookPath, targetBot.webhookCallback(webhookPath));
+
+    try {
+      const info = await targetBot.telegram.getWebhookInfo().catch(() => null);
+      if (info?.url === webhookUrl) {
+        log.info(`✅ Webhook já ativo [${name}]: ${webhookUrl}`);
+        return { mode: 'webhook', reused: true, webhookUrl };
+      }
+    } catch {}
+
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await targetBot.telegram.setWebhook(webhookUrl, { allowed_updates: ['message', 'callback_query'] });
+        log.info(`✅ Webhook registado [${name}]: ${webhookUrl}`);
+        return { mode: 'webhook', reused: false, webhookUrl, attempts: attempt };
+      } catch (err) {
+        lastErr = err;
+        const retryAfterSec = Number(err?.response?.parameters?.retry_after || 0);
+        const waitMs = Math.min(Math.max(retryAfterSec || attempt, 1), 10) * 1000;
+        log.warn(`Tentativa ${attempt}/3 setWebhook [${name}] falhou: ${err?.message || err}`);
+        if (attempt < 3) await sleepFn(waitMs);
+      }
+    }
+
+    log.error(`Webhook [${name}] mantido na rota HTTP após erro setWebhook (sem deleteWebhook em nuvem): ${lastErr?.message || lastErr}`);
+    return { mode: 'webhook', error: lastErr?.message || String(lastErr), webhookUrl };
+  }
+
+  if (isCloudEnv && !usePolling) {
+    log.warn(`[${name}] Ambiente cloud sem RENDER_EXTERNAL_URL — polling ignorado.`);
+    return { mode: 'idle' };
+  }
+
+  try {
+    await targetBot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
+    targetBot.launch({ allowedUpdates: ['message', 'callback_query'] }).catch((err) => log.error(`Erro polling [${name}]:`, err.message));
+    log.info(`✅ [${name}] ativo em modo Polling local!`);
+    return { mode: 'polling' };
+  } catch (err) {
+    log.error(`Erro ao iniciar polling [${name}]:`, err.message);
+    return { mode: 'error', error: err.message };
+  }
+}
+
 export default {
   LEGACY_WEBHOOK_KEYS,
   LEGACY_BRIDGE_SPECS,
@@ -355,5 +417,6 @@ export default {
   getLegacyBridgeConfigs,
   buildFleetRedirectKeyboard,
   registerMasterBackCompatHandlers,
-  createLegacyBridgeBots
+  createLegacyBridgeBots,
+  mountBotTransport
 };

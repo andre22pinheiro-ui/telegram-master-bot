@@ -43,7 +43,8 @@ import {
   LEGACY_WEBHOOK_KEYS,
   buildFleetRedirectKeyboard,
   registerMasterBackCompatHandlers,
-  createLegacyBridgeBots
+  createLegacyBridgeBots,
+  mountBotTransport
 } from './src/bot/legacyBridges.js';
 
 const log = createLogger('Master');
@@ -723,29 +724,6 @@ async function handleGracefulShutdown(signal) {
 process.once('SIGTERM', () => handleGracefulShutdown('SIGTERM'));
 process.once('SIGINT', () => handleGracefulShutdown('SIGINT'));
 
-async function mountBotTransport(name, targetBot, webhookPath, renderUrl) {
-  if (renderUrl && process.env.USE_POLLING !== 'true') {
-    const webhookUrl = `${renderUrl.replace(/\/$/, '')}${webhookPath}`;
-    try {
-      webhookCallbacks.set(webhookPath, targetBot.webhookCallback(webhookPath));
-      await targetBot.telegram.setWebhook(webhookUrl, { allowed_updates: ['message', 'callback_query'] });
-      log.info(`✅ Webhook registado [${name}]: ${webhookUrl}`);
-      return;
-    } catch (err) {
-      webhookCallbacks.delete(webhookPath);
-      log.error(`Falha ao configurar webhook [${name}], fallback polling:`, err.message);
-    }
-  }
-
-  try {
-    await targetBot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
-    targetBot.launch({ allowedUpdates: ['message', 'callback_query'] }).catch((err) => log.error(`Erro polling [${name}]:`, err.message));
-    log.info(`✅ [${name}] ativo em modo Polling local!`);
-  } catch (err) {
-    log.error(`Erro ao iniciar polling [${name}]:`, err.message);
-  }
-}
-
 async function startMasterBot() {
   // 1. Boot Restore Obrigatório ANTES de abrir SQLite ou HTTP :3000
   try {
@@ -764,9 +742,21 @@ async function startMasterBot() {
   startAutoDriveSync(15);
 
   const renderUrl = process.env.RENDER_EXTERNAL_URL || process.env.WEBHOOK_BASE_URL;
-  await mountBotTransport('@AndrePinheirobot', bot, '/webhook/master', renderUrl);
+  await mountBotTransport({
+    name: '@AndrePinheirobot',
+    targetBot: bot,
+    webhookPath: '/webhook/master',
+    webhookCallbacks,
+    renderUrl
+  });
   for (const bridge of legacyBridges) {
-    await mountBotTransport(bridge.name, bridge.bot, bridge.webhookPath, renderUrl);
+    await mountBotTransport({
+      name: bridge.name,
+      targetBot: bridge.bot,
+      webhookPath: bridge.webhookPath,
+      webhookCallbacks,
+      renderUrl
+    });
   }
 
   // 3. Motor Proativo Unificado (node-cron Europe/Lisbon + Silêncio Noturno 22:30-07:30 + Lembretes 15s)

@@ -23,7 +23,8 @@ const {
   LEGACY_FLEET_ACTIONS,
   getLegacyBridgeConfigs,
   registerMasterBackCompatHandlers,
-  createLegacyBridgeBots
+  createLegacyBridgeBots,
+  mountBotTransport
 } = await import('../src/bot/legacyBridges.js');
 const { SYSTEM_PROMPTS, loadAgentsMdDirectives, CONFORMANCE_MATRIX } = await import('../src/services/reasoningService.js');
 const { TRUSTED_SOURCES, isTrustedSource, fetchIpmaPortoWeather } = await import('../src/services/newsService.js');
@@ -729,6 +730,66 @@ async function main() {
       const newsSrc = fs.readFileSync(path.join(ROOT_DIR, 'src/services/newsService.js'), 'utf-8');
       assert(!newsSrc.includes('averdade.com/feed/'), 'newsService.js não pode consultar feed 404 de averdade.com/feed/');
       assert(newsSrc.includes('cm-amarante.pt/feed/'), 'newsService.js deve usar RSS oficial vivo cm-amarante.pt/feed/');
+    });
+
+    await runTest('UPG-04', 'mountBotTransport reusa webhook ativo, faz retry em 429 e nunca apaga webhook na nuvem', async () => {
+      const callbacks = new Map();
+      let setCalls = 0;
+      let deleteCalls = 0;
+      let launchCalls = 0;
+      const slept = [];
+
+      const retryBot = {
+        webhookCallback: (p) => () => p,
+        launch: async () => { launchCalls++; },
+        telegram: {
+          getWebhookInfo: async () => ({ url: '' }),
+          deleteWebhook: async () => { deleteCalls++; },
+          setWebhook: async () => {
+            setCalls++;
+            if (setCalls === 1) {
+              const err = new Error('429: Too Many Requests: retry after 2');
+              err.response = { parameters: { retry_after: 2 } };
+              throw err;
+            }
+          }
+        }
+      };
+
+      const res1 = await mountBotTransport({
+        name: 'MasterTest',
+        targetBot: retryBot,
+        webhookPath: '/webhook/master',
+        webhookCallbacks: callbacks,
+        renderUrl: 'https://telegram-master-bot-0h2h.onrender.com',
+        usePolling: false,
+        isCloudEnv: true,
+        sleepFn: async (ms) => { slept.push(ms); }
+      });
+
+      assert(res1.mode === 'webhook' && res1.attempts === 2, 'Deve recuperar de erro 429 na 2.ª tentativa');
+      assert(slept[0] === 2000, 'Deve respeitar retry_after=2s do Telegram');
+      assert(callbacks.has('/webhook/master'), 'Callback HTTP deve permanecer montado');
+      assert(deleteCalls === 0 && launchCalls === 0, 'Em cloud nunca pode chamar deleteWebhook nem polling launch');
+
+      let reusedSetCalls = 0;
+      const reuseBot = {
+        webhookCallback: (p) => () => p,
+        telegram: {
+          getWebhookInfo: async () => ({ url: 'https://telegram-master-bot-0h2h.onrender.com/webhook/master' }),
+          setWebhook: async () => { reusedSetCalls++; }
+        }
+      };
+      const res2 = await mountBotTransport({
+        name: 'MasterReuse',
+        targetBot: reuseBot,
+        webhookPath: '/webhook/master',
+        webhookCallbacks: callbacks,
+        renderUrl: 'https://telegram-master-bot-0h2h.onrender.com',
+        usePolling: false,
+        sleepFn: async () => {}
+      });
+      assert(res2.reused === true && reusedSetCalls === 0, 'Deve reutilizar webhook já registado sem chamar setWebhook');
     });
   } finally {
     sqliteMasterDb.close();
