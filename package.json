@@ -1,14 +1,14 @@
 {
   "name": "telegram-master-bot",
-  "version": "1.0.0",
-  "description": "Bot Orquestrador Telegram com arquitetura Master-Worker unificada",
+  "version": "2.0.0",
+  "description": "Grok Bot (@AndrePinheirobot) — Assistente Pessoal, Familiar, Notícias Certificadas & Radar 5 Frentes com SQLite WAL",
   "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
     "test": "node tests/run_master_battery.mjs",
-    "test:all": "node tests/test_all_bots_maximum_response.mjs",
+    "test:live": "node tests/test_all_bots_maximum_response.mjs",
     "pm2:start": "pm2 start ecosystem.config.cjs",
     "pm2:stop": "pm2 stop telegram-master-bot",
     "pm2:restart": "pm2 restart telegram-master-bot",
@@ -16,7 +16,6 @@
   },
   "dependencies": {
     "@octokit/rest": "^22.0.1",
-    "@supabase/supabase-js": "^2.119.0",
     "axios": "^1.21.0",
     "better-sqlite3": "^13.0.3",
     "cors": "^2.8.5",
@@ -27,7 +26,7 @@
     "telegraf": "^4.16.3"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "author": "André Pinheiro",
   "license": "MIT"

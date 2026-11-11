@@ -255,16 +255,36 @@ export async function uploadOrUpdateFileInDrive({ filePath, fileName, folderId =
  * Ficheiros críticos a sincronizar com a nuvem (Google Drive).
  */
 export const CRITICAL_FILES = [
-  { name: 'autorizados.json', path: './data/autorizados.json' },
-  { name: 'conversas_historico.json', path: './data/conversas_historico.json' },
-  { name: 'family_store.json', path: './data/family_store.json' },
-  { name: 'imoveis_amarante.db', path: './data/imoveis_amarante.db' }
+  { name: 'pessoal_master.db', path: './data/pessoal_master.db' },
+  { name: 'autorizados.json', path: './data/autorizados.json' }
 ];
+
+// Estado telemetrico do sincronizador Google Drive
+const driveSyncState = {
+  lastRestoreAt: null,
+  lastRestoreCount: 0,
+  lastSyncAt: null,
+  lastSyncOk: null,
+  lastSyncedCount: 0,
+  lastError: null
+};
+
+export function getDriveSyncStatus() {
+  return {
+    configured: isDriveConfigured(),
+    folderId: DEFAULT_DRIVE_FOLDER_ID,
+    ...driveSyncState
+  };
+}
 
 /**
  * Restaura todos os ficheiros críticos do Google Drive para o disco local durante o arranque do servidor.
+ * NOTA: Deve correr ANTES de sqliteMasterDb.getDb() para evitar handles abertos num ficheiro antigo.
  */
 export async function restoreAllFromDrive(folderId = DEFAULT_DRIVE_FOLDER_ID) {
+  if (process.env.DISABLE_DRIVE_SYNC === 'true') {
+    return false;
+  }
   if (!isDriveConfigured()) {
     log.warn('Google Drive não configurado; arranque prossegue com dados locais.');
     return false;
@@ -280,69 +300,119 @@ export async function restoreAllFromDrive(folderId = DEFAULT_DRIVE_FOLDER_ID) {
     if (remoteFile) {
       log.info(`📥 A descarregar [${item.name}] da nuvem (modificado: ${remoteFile.modifiedTime})...`);
       const ok = await downloadFileFromDrive(remoteFile.id, localTarget);
-      if (ok) restoredCount++;
+      if (ok) {
+        restoredCount++;
+        // Remover WAL/SHM antigos caso existam antes de reabrir SQLite
+        if (item.name === 'pessoal_master.db') {
+          try {
+            const { unlinkSync } = await import('fs');
+            if (existsSync(`${localTarget}-wal`)) unlinkSync(`${localTarget}-wal`);
+            if (existsSync(`${localTarget}-shm`)) unlinkSync(`${localTarget}-shm`);
+          } catch {}
+        }
+      }
     } else {
       log.debug(`Ficheiro [${item.name}] não encontrado no Drive; mantém-se a versão local se existir.`);
     }
   }
 
+  driveSyncState.lastRestoreAt = new Date().toISOString();
+  driveSyncState.lastRestoreCount = restoredCount;
   log.info(`🏁 Restauro do Google Drive concluído (${restoredCount}/${CRITICAL_FILES.length} ficheiros restaurados).`);
   return restoredCount > 0;
+}
+
+/**
+ * Boot Restore Obrigatório: garante restauro do Google Drive antes de abrir a porta HTTP.
+ */
+export async function initCloudPersistence(folderId = DEFAULT_DRIVE_FOLDER_ID) {
+  try {
+    return await restoreAllFromDrive(folderId);
+  } catch (err) {
+    driveSyncState.lastError = err.message;
+    log.error('Falha em initCloudPersistence:', err.message);
+    return false;
+  }
 }
 
 /**
  * Sincroniza todos os ficheiros críticos locais para o Google Drive.
  */
 export async function syncAllToDrive(folderId = DEFAULT_DRIVE_FOLDER_ID) {
-  if (!isDriveConfigured()) return false;
+  if (process.env.DISABLE_DRIVE_SYNC === 'true' || !isDriveConfigured()) return false;
 
   log.info('☁️ A sincronizar ficheiros críticos para o Google Drive...');
   let synced = 0;
 
-  for (const item of CRITICAL_FILES) {
-    const localPath = path.resolve(ROOT_DIR, item.path);
-    if (existsSync(localPath)) {
-      if (item.name === 'imoveis_amarante.db') {
-        try {
-          const { checkpointImmoDb } = await import('./immoRadarService.js');
-          checkpointImmoDb?.();
-        } catch (_) {}
+  try {
+    for (const item of CRITICAL_FILES) {
+      const localPath = path.resolve(ROOT_DIR, item.path);
+      if (existsSync(localPath)) {
+        if (item.name === 'pessoal_master.db') {
+          try {
+            const { checkpointMasterDb } = await import('../shared/sqliteMasterDb.js');
+            checkpointMasterDb?.();
+          } catch (_) {}
+        }
+        const res = await uploadOrUpdateFileInDrive({
+          filePath: localPath,
+          fileName: item.name,
+          folderId
+        });
+        if (res) synced++;
       }
-      const res = await uploadOrUpdateFileInDrive({
-        filePath: localPath,
-        fileName: item.name,
-        folderId
-      });
-      if (res) synced++;
     }
-  }
 
-  log.info(`✅ Sincronização para o Google Drive terminada (${synced}/${CRITICAL_FILES.length} sincronizados).`);
-  return synced > 0;
+    driveSyncState.lastSyncAt = new Date().toISOString();
+    driveSyncState.lastSyncOk = synced > 0;
+    driveSyncState.lastSyncedCount = synced;
+    driveSyncState.lastError = null;
+    log.info(`✅ Sincronização para o Google Drive terminada (${synced}/${CRITICAL_FILES.length} sincronizados).`);
+    return synced > 0;
+  } catch (err) {
+    driveSyncState.lastSyncAt = new Date().toISOString();
+    driveSyncState.lastSyncOk = false;
+    driveSyncState.lastError = err.message;
+    log.error('Erro em syncAllToDrive:', err.message);
+    return false;
+  }
 }
 
 let debouncedSyncTimer = null;
 
 /**
- * Dispara uma sincronização para o Google Drive com debounce (ex: 20s após a última alteração).
- * Evita chamadas repetidas e garante persistência rápida após qualquer escrita.
+ * Hook Write-Through Cloud Sync: envia pessoal_master.db e autorizados.json para o Drive
+ * após delayMs (padrão 5000ms = 5s) da última escrita em tabelas críticas.
  */
-export function triggerDebouncedDriveSync(delayMs = 20000, folderId = DEFAULT_DRIVE_FOLDER_ID) {
-  if (!isDriveConfigured()) return;
+export function triggerCloudSyncDebounced(delayMs = 5000, folderId = DEFAULT_DRIVE_FOLDER_ID) {
+  if (process.env.DISABLE_DRIVE_SYNC === 'true' || process.env.NODE_ENV === 'test') {
+    return false;
+  }
+  if (!isDriveConfigured()) return false;
+
   if (debouncedSyncTimer) {
     clearTimeout(debouncedSyncTimer);
   }
-  log.info(`⏳ Sincronização orientada a eventos no Drive agendada para daqui a ${delayMs / 1000}s.`);
+  log.debug(`⏳ Write-Through Google Drive agendado para daqui a ${delayMs / 1000}s.`);
   debouncedSyncTimer = setTimeout(async () => {
     try {
-      log.info('🚀 A executar sincronização agendada por eventos no Google Drive...');
+      log.info('🚀 A executar sincronização Write-Through no Google Drive...');
       await syncAllToDrive(folderId);
     } catch (err) {
-      log.error('Erro na sincronização orientada a eventos:', err.message);
+      log.error('Erro na sincronização Write-Through:', err.message);
     } finally {
       debouncedSyncTimer = null;
     }
   }, delayMs);
+  debouncedSyncTimer.unref?.();
+  return true;
+}
+
+/**
+ * Retrocompatibilidade para chamadas existentes.
+ */
+export function triggerDebouncedDriveSync(delayMs = 5000, folderId = DEFAULT_DRIVE_FOLDER_ID) {
+  return triggerCloudSyncDebounced(delayMs, folderId);
 }
 
 /**
@@ -358,7 +428,7 @@ export function startAutoDriveSync(intervalMinutes = 15, folderId = DEFAULT_DRIV
     } catch (err) {
       log.error('Erro no ciclo de sincronização automática com o Google Drive:', err.message);
     }
-  }, ms);
+  }, ms).unref?.();
 
   log.info(`⏰ Sincronizador persistente do Google Drive ativo (a cada ${intervalMinutes} minutos).`);
 }
@@ -367,5 +437,14 @@ export function startAutoDriveSync(intervalMinutes = 15, folderId = DEFAULT_DRIV
  * Função mantida para retrocompatibilidade com comandos de backup manual (/backup).
  */
 export async function backupDatabaseToDrive() {
-  return syncAllToDrive();
+  if (!isDriveConfigured()) {
+    return { success: false, error: 'Google Drive não configurado.' };
+  }
+  const ok = await syncAllToDrive();
+  return {
+    success: ok,
+    timestamp: new Date().toLocaleString('pt-PT', { timeZone: 'Europe/Lisbon' }),
+    files: CRITICAL_FILES.map((f) => ({ name: f.name, link: `https://drive.google.com/drive/folders/${DEFAULT_DRIVE_FOLDER_ID}` })),
+    error: driveSyncState.lastError
+  };
 }

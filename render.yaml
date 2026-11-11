@@ -1,5 +1,6 @@
-# render.yaml — Configuração automática do Render.com (Blueprint)
-# O Render lê este ficheiro e cria o serviço automaticamente.
+# render.yaml — Arquitetura 100% Cloud-Native (2 Serviços Web Isolados no Render)
+# Serviço 1: telegram-master-bot (@AndrePinheirobot) -> Pessoal & Familiar (SQLite WAL + Google Drive, ZERO Supabase)
+# Serviço 2: zeropaper-frota-bot (@zeropaperfrotaBot) -> Trabalho & Frotas (Supabase AppFrota + ORS + CE 561/2006)
 
 services:
   - type: web
@@ -15,33 +16,25 @@ services:
         value: production
       - key: LOG_LEVEL
         value: info
+      - key: PORT
+        value: "3000"
       - key: TELEGRAM_BOT_TOKEN_MASTER
-        sync: false
-      - key: TELEGRAM_DEV_TOKEN
-        sync: false
-      - key: TELEGRAM_FROTAS_TOKEN
-        sync: false
-      - key: TELEGRAM_IMMO_TOKEN
-        sync: false
-      - key: TELEGRAM_PESSOAL_TOKEN
-        sync: false
-      - key: TELEGRAM_NUTRICAO_TOKEN
         sync: false
       - key: CHAT_ID_AUTORIZADO
         sync: false
-      - key: GEMINI_API_KEY
+      - key: CHAT_ID_ESPOSA
         sync: false
-      - key: OPENROUTER_API_KEY
+      - key: GEMINI_API_KEY
         sync: false
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_MODEL
+        value: qwen/qwen3.8-27b
+      - key: OPENROUTER_API_KEY
         sync: false
       - key: GITHUB_TOKEN
         sync: false
       - key: GITHUB_OWNER
-        sync: false
-      - key: ORS_API_KEY
         sync: false
       - key: CLOUDINARY_API_KEY
         sync: false
@@ -53,15 +46,56 @@ services:
         sync: false
       - key: CLOUDINARY_UPLOAD_PRESET
         sync: false
-      - key: HUGGINGFACE_TOKEN
-        sync: false
       - key: EMAIL_USER
         sync: false
       - key: EMAIL_PASS
         sync: false
-      - key: EMAIL_PASSWORD
-        sync: false
+      - key: EMAIL_HOST
+        value: imap.gmail.com
+      - key: EMAIL_PORT
+        value: "993"
       - key: GOOGLE_SERVICE_ACCOUNT_KEY
         sync: false
       - key: GOOGLE_DRIVE_FOLDER_ID
         sync: false
+      - key: TELEGRAM_WEBAPP_URL
+        value: https://gestao-familiar-webapp.vercel.app
+      - key: RENDER_EXTERNAL_URL
+        value: https://telegram-master-bot-0h2h.onrender.com
+      - key: VERCEL_DEPLOY_HOOK_URL
+        sync: false
+
+  - type: web
+    name: zeropaper-frota-bot
+    repo: https://github.com/andre22pinheiro-ui/zeropaper-frota-bot
+    branch: main
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: TELEGRAM_FROTAS_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: ADMIN_TELEGRAM_ID
+        value: "950415577"
+      - key: SUPABASE_URL
+        value: "https://bwibtpcunojmtnrnqpvg.supabase.co"
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ORS_API_KEY
+        sync: false
+      - key: APP_BASE_URL
+        value: "https://appfrota-ten.vercel.app"

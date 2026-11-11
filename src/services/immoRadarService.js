@@ -1,101 +1,29 @@
-// src/services/immoRadarService.js — Motor de Radar, Pesquisa Diária e Alertas de Imóveis em Amarante
-import Database from 'better-sqlite3';
-import path from 'path';
-import axios from 'axios';
+// src/services/immoRadarService.js — Frente 1 (Imobiliário Amarante CMVM) + Orquestrador Multi-Frente 5 Frentes
 import { createLogger } from '../utils/logger.js';
+import { sqliteMasterDb, checkpointMasterDb } from '../shared/sqliteMasterDb.js';
 import { avaliarImovelCmvm, formatarAvaliacaoMarkdown } from './immoCmvmService.js';
 import { IMMO_SITES, VERCEL_IMMO_APP } from '../shared/immoSitesCatalog.js';
 import { searchLiveWeb } from '../shared/webSearch.js';
+import { parsePriceEur, sendRadarTelegramAlert, runWebFrontSearch } from './radarCommon.js';
+import { scanAutos } from './autoRadarService.js';
+import { scanTech } from './techRadarService.js';
+import { scanAmazon } from './amazonRadarService.js';
+import { scanApple } from './appleRadarService.js';
 
 const log = createLogger('ImmoRadar');
-const DB_PATH = path.resolve('./data/imoveis_amarante.db');
-const ANDRE_CHAT_ID = process.env.TELEGRAM_ADMIN_ID || '950415577';
 
-let db;
-try {
-  db = new Database(DB_PATH);
-  db.pragma('journal_mode = WAL');
-  initTables();
-} catch (err) {
-  log.error('Erro ao ligar à base de dados imoveis_amarante.db:', err.message);
+function getLisbonTimeParts(date = new Date()) {
+  const fmt = new Intl.DateTimeFormat('pt-PT', {
+    timeZone: 'Europe/Lisbon',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+  const [hh, mm] = fmt.format(date).split(':').map((n) => parseInt(n, 10));
+  const dayKey = date.toLocaleDateString('pt-PT', { timeZone: 'Europe/Lisbon' });
+  return { hour: hh, minute: mm, dayKey };
 }
 
-function initTables() {
-  if (!db) return;
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS imoveis (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      fingerprint TEXT NOT NULL,
-      freguesia TEXT,
-      tipologia TEXT,
-      titulo TEXT,
-      portal TEXT,
-      url TEXT UNIQUE,
-      preco REAL,
-      area_util REAL,
-      area_terreno REAL,
-      classe_energetica TEXT,
-      sem_licenca INTEGER DEFAULT 0,
-      is_ruina INTEGER DEFAULT 0,
-      valor_cmvm REAL,
-      classificacao TEXT,
-      alertado INTEGER DEFAULT 0,
-      data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      data_atualizacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS radar_execucoes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      data_execucao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      novos_encontrados INTEGER DEFAULT 0,
-      total_varridos INTEGER DEFAULT 0,
-      status TEXT
-    );
-  `);
-
-  // Migrações seguras e dinâmicas para bases de dados pré-existentes
-  try {
-    const colunas = db.prepare("PRAGMA table_info(imoveis)").all().map(c => c.name);
-    if (!colunas.includes('valor_cmvm')) {
-      db.exec('ALTER TABLE imoveis ADD COLUMN valor_cmvm REAL;');
-    }
-    if (!colunas.includes('classificacao')) {
-      db.exec('ALTER TABLE imoveis ADD COLUMN classificacao TEXT;');
-    }
-    if (!colunas.includes('alertado')) {
-      db.exec('ALTER TABLE imoveis ADD COLUMN alertado INTEGER DEFAULT 0;');
-    }
-    if (!colunas.includes('is_ruina')) {
-      db.exec('ALTER TABLE imoveis ADD COLUMN is_ruina INTEGER DEFAULT 0;');
-    }
-
-    // Calcular valores CMVM para imóveis existentes que ainda não tenham avaliação
-    const pendentes = db.prepare('SELECT * FROM imoveis WHERE valor_cmvm IS NULL OR valor_cmvm = 0').all();
-    if (pendentes.length > 0) {
-      log.info(`A calcular normas CMVM para ${pendentes.length} imóveis existentes na base de dados...`);
-      const updateStmt = db.prepare('UPDATE imoveis SET valor_cmvm = ?, classificacao = ? WHERE id = ?');
-      for (const row of pendentes) {
-        const av = avaliarImovelCmvm({
-          precoAnunciado: row.preco || 0,
-          areaUtil: row.area_util || 100,
-          areaTerreno: row.area_terreno || 0,
-          classeEnergetica: row.classe_energetica || 'D',
-          zona: row.freguesia || 'Amarante',
-          semLicenca: Boolean(row.sem_licenca),
-          isRuina: Boolean(row.is_ruina)
-        });
-        updateStmt.run(av.valorIntrinseco, av.classificacao, row.id);
-      }
-      log.info('Valores CMVM calculados e guardados para todo o acervo imobiliário!');
-    }
-  } catch (migErr) {
-    log.warn('Aviso de migração de colunas em imoveis:', migErr.message);
-  }
-}
-
-/**
- * Normaliza e gera fingerprint único de um imóvel
- */
 function gerarFingerprint(freguesia, tipologia, areaUtil) {
   const f = (freguesia || 'amarante').toLowerCase().trim().replace(/\s+/g, '-');
   const t = (tipologia || 'T3').toUpperCase().replace('V', 'T');
@@ -104,12 +32,10 @@ function gerarFingerprint(freguesia, tipologia, areaUtil) {
 }
 
 /**
- * Insere ou atualiza um imóvel na base de dados
- * Devolve { isNovo: boolean, imovel: Object }
+ * Insere ou atualiza um imóvel na tabela radar_casas do SQLite Master.
+ * Devolve { isNovo, priceDropped, previousPrice, imovel }.
  */
 export function guardarImovel(dados) {
-  if (!db) return { isNovo: false, imovel: dados };
-
   const fp = gerarFingerprint(dados.freguesia, dados.tipologia, dados.area_util);
   const av = avaliarImovelCmvm({
     precoAnunciado: dados.preco,
@@ -121,103 +47,46 @@ export function guardarImovel(dados) {
     isRuina: Boolean(dados.is_ruina)
   });
 
-  const existente = db.prepare('SELECT id, preco, alertado FROM imoveis WHERE url = ? OR (fingerprint = ? AND preco = ?)').get(dados.url, fp, dados.preco);
-
-  if (existente) {
-    db.prepare(`
-      UPDATE imoveis 
-      SET preco = ?, valor_cmvm = ?, classificacao = ?, data_atualizacao = datetime('now', 'localtime')
-      WHERE id = ?
-    `).run(dados.preco, av.valorIntrinseco, av.classificacao, existente.id);
-
-    return {
-      isNovo: false,
-      imovel: { ...dados, id: existente.id, valor_cmvm: av.valorIntrinseco, classificacao: av.classificacao }
-    };
-  }
-
-  const res = db.prepare(`
-    INSERT INTO imoveis (
-      fingerprint, freguesia, tipologia, titulo, portal, url, preco,
-      area_util, area_terreno, classe_energetica, sem_licenca, is_ruina,
-      valor_cmvm, classificacao, alertado
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-  `).run(
-    fp,
-    dados.freguesia || 'Amarante',
-    dados.tipologia || 'T3',
-    dados.titulo || 'Moradia em Amarante',
-    dados.portal || 'Imobiliária',
-    dados.url,
-    dados.preco || 0,
-    dados.area_util || 100,
-    dados.area_terreno || 0,
-    dados.classe_energetica || 'D',
-    dados.sem_licenca ? 1 : 0,
-    dados.is_ruina ? 1 : 0,
-    av.valorIntrinseco,
-    av.classificacao
-  );
-
-  // Sincronizar quase em tempo real para o Google Drive
-  import('./googleDriveService.js')
-    .then(m => m.triggerDebouncedDriveSync?.(30000))
-    .catch(() => {});
+  const res = sqliteMasterDb.upsertRadarCasa({
+    ...dados,
+    fingerprint: fp,
+    valor_cmvm: av.valorIntrinseco,
+    classificacao: av.classificacao
+  });
 
   return {
-    isNovo: true,
-    imovel: { ...dados, id: res.lastInsertRowid, valor_cmvm: av.valorIntrinseco, classificacao: av.classificacao }
+    isNovo: res.isNew,
+    priceDropped: res.priceDropped,
+    previousPrice: res.previousPrice,
+    imovel: res.record
   };
 }
 
-/**
- * Obtém todos os imóveis monitorizados
- */
 export function listarImoveis(limite = 20) {
-  if (!db) return [];
-  return db.prepare('SELECT * FROM imoveis ORDER BY data_criacao DESC LIMIT ?').all(limite);
+  return sqliteMasterDb.getRadarCasas(limite);
 }
 
-/**
- * Obtém os imóveis novos que ainda não foram alertados
- */
 export function obterImoveisNaoAlertados() {
-  if (!db) return [];
-  return db.prepare('SELECT * FROM imoveis WHERE alertado = 0 ORDER BY data_criacao DESC').all();
+  return sqliteMasterDb.getDb().prepare('SELECT * FROM radar_casas WHERE alertado = 0 AND preco > 0 ORDER BY id DESC').all();
 }
 
-/**
- * Marca imóveis como alertados
- */
 export function marcarAlertados(ids = []) {
-  if (!db || ids.length === 0) return;
-  const stmt = db.prepare('UPDATE imoveis SET alertado = 1 WHERE id = ?');
-  const tx = db.transaction((idList) => {
-    for (const id of idList) stmt.run(id);
-  });
-  tx(ids);
+  for (const id of ids) {
+    sqliteMasterDb.markRadarAlerted('radar_casas', id);
+  }
 }
 
-/**
- * Obtém as melhores oportunidades CMVM ativas (preço < valor intrínseco)
- */
 export function obterOportunidades(limite = 5) {
-  if (!db) return [];
-  return db.prepare(`
-    SELECT * FROM imoveis 
-    WHERE preco > 0 AND valor_cmvm > preco AND preco <= 300000
-    ORDER BY (valor_cmvm - preco) DESC 
-    LIMIT ?
-  `).all(limite);
+  return sqliteMasterDb
+    .getDb()
+    .prepare('SELECT * FROM radar_casas WHERE preco > 0 AND valor_cmvm > preco AND preco <= 300000 ORDER BY (valor_cmvm - preco) DESC LIMIT ?')
+    .all(limite);
 }
 
-/**
- * Formata um alerta urgente de Novo Imóvel para o Telegram
- */
-export function formatarAlertaNovoImovel(imovel) {
+export function formatarAlertaNovoImovel(imovel, headerOverride = null) {
   const av = avaliarImovelCmvm({
     precoAnunciado: imovel.preco,
-    areaUtil: imovel.area_util,
+    areaUtil: imovel.area_util || 120,
     areaTerreno: imovel.area_terreno || 0,
     classeEnergetica: imovel.classe_energetica || 'D',
     zona: imovel.freguesia || 'Amarante',
@@ -225,36 +94,27 @@ export function formatarAlertaNovoImovel(imovel) {
     isRuina: Boolean(imovel.is_ruina)
   });
 
-  let md = `🚨 *NOVO ANÚNCIO DETETADO EM AMARANTE!*\n`;
+  let md = headerOverride || `🚨 *NOVO ANÚNCIO DETETADO EM AMARANTE!*\n`;
   md += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
   md += `🏡 *${imovel.titulo}*\n`;
   md += `📍 *Freguesia:* ${imovel.freguesia} | *Portal:* ${imovel.portal}\n`;
-  md += `📐 *Área Útil:* ${imovel.area_util} m² | *Terreno:* ${imovel.area_terreno || 0} m²\n\n`;
-
+  md += `📐 *Área Útil:* ${imovel.area_util || 100} m² | *Terreno:* ${imovel.area_terreno || 0} m²\n\n`;
+  if (imovel.preco_anterior && imovel.preco < imovel.preco_anterior) {
+    md += `📉 *BAIXA DE PREÇO:* ${Number(imovel.preco_anterior).toLocaleString('pt-PT')} € ➔ *${Number(imovel.preco).toLocaleString('pt-PT')} €*\n`;
+  }
   md += `💰 *Preço Pedido:* **${Number(imovel.preco).toLocaleString('pt-PT')} €**\n`;
   md += `📊 *Avaliação CMVM:* **${av.valorIntrinseco.toLocaleString('pt-PT')} €** (\`${av.precoM2Cmvm} €/m²\`)\n`;
   md += `🎯 *Veredito:* **${av.classificacao}**\n`;
   md += `💡 _${av.veredito}_\n\n`;
-
-  if (imovel.sem_licenca) {
-    md += `⚠️ *Atenção:* Indicativo de ausência de Licença de Utilização!\n`;
-  }
-  if (imovel.is_ruina) {
-    md += `🏗️ *Atenção:* Imóvel necessita de reconstrução total.\n`;
-  }
-
-  md += `🔗 [Ver Anúncio no Portal Original](${imovel.url})\n`;
+  md += `🔗 [Ver Anúncio Original](${imovel.url})\n`;
   md += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-  md += `📱 _Avaliado pelas normas da Mini App:_ \`${VERCEL_IMMO_APP.url}\``;
+  md += `📱 _Mini App CMVM:_ \`${VERCEL_IMMO_APP.url}\``;
 
   const keyboard = {
     inline_keyboard: [
       [
         { text: '🔗 Abrir Anúncio', url: imovel.url },
-        { text: '🏠 Abrir na Mini App', web_app: { url: VERCEL_IMMO_APP.url } }
-      ],
-      [
-        { text: '📊 Simular Oferta CMVM', callback_data: `immo_sim_${imovel.id}` }
+        { text: '🏠 Abrir ImmoEval', web_app: { url: VERCEL_IMMO_APP.url } }
       ]
     ]
   };
@@ -262,67 +122,102 @@ export function formatarAlertaNovoImovel(imovel) {
   return { text: md, keyboard };
 }
 
-/**
- * Gera o Relatório Diário Consolidado de Mercado Imobiliário
- */
 export function gerarRelatorioDiarioMarkdown() {
-  if (!db) return '❌ Base de dados imobiliária indisponível.';
-
-  const total = db.prepare('SELECT count(*) as c FROM imoveis').get().c;
-  const novasUltimas24h = db.prepare("SELECT * FROM imoveis WHERE data_criacao >= datetime('now', '-24 hours') ORDER BY data_criacao DESC").all();
+  const casas = sqliteMasterDb.getRadarCasas(50);
   const oportunidades = obterOportunidades(4);
+  const now24h = Date.now() - 24 * 60 * 60 * 1000;
+  const recentes = casas.filter((c) => {
+    const dt = new Date(c.data_criacao).getTime();
+    return !Number.isNaN(dt) && dt >= now24h;
+  });
 
-  let md = `📋 *RELATÓRIO DIÁRIO IMOBILIÁRIO — AMARANTE*\n`;
-  md += `📅 *Data:* \`${new Date().toLocaleDateString('pt-PT')}\` | *Fonte:* Normas CMVM & App Vercel\n`;
+  let md = `📋 *RELATÓRIO IMOBILIÁRIO CMVM — AMARANTE*\n`;
+  md += `📅 *Data:* \`${new Date().toLocaleDateString('pt-PT', { timeZone: 'Europe/Lisbon' })}\`\n`;
   md += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-  md += `📊 *RESUMO DO MERCADO MONITORIZADO:*\n`;
-  md += `• Total de moradias sob radar: *${total}*\n`;
-  md += `• Novas entradas nas últimas 24h: *${novasUltimas24h.length}*\n`;
-  md += `• Oportunidades com margem positiva CMVM: *${oportunidades.length}*\n\n`;
+  md += `• Moradias monitorizadas: *${casas.length}*\n`;
+  md += `• Entradas últimas 24h: *${recentes.length}*\n`;
+  md += `• Oportunidades abaixo CMVM: *${oportunidades.length}*\n\n`;
 
-  if (novasUltimas24h.length > 0) {
-    md += `🆕 *NOVOS ANÚNCIOS REGISTADOS HOJE:*\n`;
-    novasUltimas24h.slice(0, 5).forEach((item, i) => {
-      const precoFmt = Number(item.preco).toLocaleString('pt-PT');
-      const cmvmFmt = Number(item.valor_cmvm).toLocaleString('pt-PT');
+  if (recentes.length > 0) {
+    md += `🆕 *ÚLTIMAS ENTRADAS:*\n`;
+    recentes.slice(0, 5).forEach((item, i) => {
       md += `*${i + 1}. ${item.titulo}*\n`;
-      md += `   ↳ ${item.freguesia} | *${precoFmt} €* (CMVM: ${cmvmFmt} €) | ${item.portal}\n`;
-      md += `   ↳ 🔗 [Ver Anúncio](${item.url})\n\n`;
+      md += `   ↳ ${item.freguesia} | *${Number(item.preco || 0).toLocaleString('pt-PT')} €* (CMVM: ${Number(item.valor_cmvm || 0).toLocaleString('pt-PT')} €) | ${item.portal}\n`;
+      md += `   ↳ 🔗 ${item.url}\n\n`;
     });
   } else {
-    md += `ℹ️ _Sem novas moradias nas últimas 24h. O radar contínuo permanece ativo nos 12 portais._\n\n`;
+    md += `ℹ️ _Sem novas entradas nas últimas 24h em radar_casas._\n\n`;
   }
 
   if (oportunidades.length > 0) {
-    md += `💎 *TOP OPORTUNIDADES ABAIXO DO VALOR DE MERCADO:*\n`;
+    md += `💎 *TOP OPORTUNIDADES CMVM:*\n`;
     oportunidades.forEach((op, i) => {
-      const ganho = Math.round(op.valor_cmvm - op.preco);
-      md += `*${i + 1}. ${op.titulo}*\n`;
-      md += `   • Pedido: *${Number(op.preco).toLocaleString('pt-PT')} €* | Avaliação: *${Number(op.valor_cmvm).toLocaleString('pt-PT')} €*\n`;
-      md += `   • Margem teórica de valorização: *+${ganho.toLocaleString('pt-PT')} €* (${op.classificacao})\n`;
-      md += `   • 🔗 [Abrir Anúncio](${op.url})\n\n`;
+      const margem = Math.round((op.valor_cmvm || 0) - (op.preco || 0));
+      md += `*${i + 1}. ${op.titulo}* — Pedido: *${Number(op.preco).toLocaleString('pt-PT')} €* | Margem: +${margem.toLocaleString('pt-PT')} €\n`;
+      md += `   ↳ 🔗 ${op.url}\n`;
     });
   }
-
-  md += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-  md += `🌐 *Mini App Imobiliária:* [ImmoEval Vercel](${VERCEL_IMMO_APP.url})\n`;
-  md += `_Toque nos botões para navegar:_`;
 
   return md;
 }
 
 /**
- * Pesquisa em tempo real moradias novas e empreendimentos nos portais imobiliários
+ * Relatório Consolidado Matinal das 5 Frentes (08h30)
  */
+export function gerarRelatorioMultiFrenteMarkdown() {
+  const stats = sqliteMasterDb.getStats().tables;
+  const filtros = sqliteMasterDb.getRadarFilters(true);
+  const immoReport = gerarRelatorioDiarioMarkdown();
+
+  const carros = sqliteMasterDb.getRadarCarros(2);
+  const tech = sqliteMasterDb.getRadarTech(2);
+  const amazon = sqliteMasterDb.getRadarAmazon(2);
+  const apple = sqliteMasterDb.getRadarApple(2);
+
+  let md = `📡 *RELATÓRIO DIÁRIO — RADAR MULTI-FRENTE (5 FRENTES)*\n`;
+  md += `🕒 _${new Date().toLocaleString('pt-PT', { timeZone: 'Europe/Lisbon', hour12: false })}_\n`;
+  md += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  md += `📊 *Stock Monitorizado:* Casas: ${stats.radar_casas} | Carros: ${stats.radar_carros} | Tech: ${stats.radar_tech} | Amazon: ${stats.radar_amazon} | Apple: ${stats.radar_apple} | Alertas \`/vigiar\`: *${filtros.length}*\n\n`;
+
+  md += immoReport + '\n\n';
+
+  if (carros.length > 0) {
+    md += `🚗 *Carros Recentes:*\n${carros.map((c) => `• ${c.marca_modelo} — *${c.preco} €* (${c.portal}) ${c.url}`).join('\n')}\n\n`;
+  }
+  if (tech.length > 0) {
+    md += `💻 *Tech Recente:*\n${tech.map((t) => `• ${t.produto} — *${t.preco} €* (${t.loja}) ${t.url}`).join('\n')}\n\n`;
+  }
+  if (amazon.length > 0) {
+    md += `📦 *Amazon.es / Segunda Mano:*\n${amazon.map((a) => `• ${a.titulo} — *${a.preco} €* ${a.url}`).join('\n')}\n\n`;
+  }
+  if (apple.length > 0) {
+    md += `🍎 *Apple Novo vs Recondicionado:*\n${apple.map((ap) => `• ${ap.modelo} (${ap.condicao}) — *${ap.preco} €* ${ap.url}`).join('\n')}\n\n`;
+  }
+
+  md += `⚡ *Pesquisa instantânea:* \`/casas\`, \`/carros\`, \`/tech\`, \`/amazon\`, \`/apple\`, \`/vigiar\``;
+  return md;
+}
+
+function detectImmoPortal(url = '') {
+  if (url.includes('idealista.pt')) return 'Idealista';
+  if (url.includes('imovirtual.com')) return 'Imovirtual';
+  if (url.includes('remax.pt')) return 'RE/MAX';
+  if (url.includes('era.pt')) return 'ERA';
+  if (url.includes('casasapo.pt')) return 'Casa Sapo';
+  if (url.includes('supercasa.pt')) return 'Supercasa';
+  if (url.includes('olx.pt')) return 'OLX';
+  if (url.includes('custojusto.pt')) return 'CustoJusto';
+  return 'Portal Imobiliário';
+}
+
 export async function pesquisarMoradiasNovasPlataformas({ zona = 'Amarante', tipologia = '', precoMax = 250000 } = {}) {
-  log.info('A pesquisar moradias novas em tempo real nas plataformas...', { zona, tipologia, precoMax });
+  log.info('A pesquisar moradias em tempo real nas plataformas...', { zona, tipologia, precoMax });
 
   const queryTerms = [
-    `moradias novas ${zona} empreendimentos`,
+    `moradias venda ${zona} ${tipologia}`.trim(),
     `moradias venda ${zona} site:idealista.pt/comprar-casas`,
-    `moradias ${zona} site:imovirtual.com/pt/resultados/comprar/moradia`,
-    `moradias ${zona} site:remax.pt`,
-    `moradias ${zona} site:era.pt`
+    `moradias ${zona} site:imovirtual.com`,
+    `moradias ${zona} site:remax.pt OR site:era.pt`
   ];
 
   const resultados = [];
@@ -332,29 +227,13 @@ export async function pesquisarMoradiasNovasPlataformas({ zona = 'Amarante', tip
     try {
       const items = await searchLiveWeb(q, 4);
       for (const r of items) {
-        if (!r.url || seenUrls.has(r.url)) continue;
+        if (!r?.url || seenUrls.has(r.url)) continue;
         seenUrls.add(r.url);
 
-        let portal = 'Portal Web';
-        if (r.url.includes('idealista.pt')) portal = 'Idealista';
-        else if (r.url.includes('imovirtual.com')) portal = 'Imovirtual';
-        else if (r.url.includes('remax.pt')) portal = 'RE/MAX';
-        else if (r.url.includes('era.pt')) portal = 'ERA';
-        else if (r.url.includes('casasapo.pt')) portal = 'Casa Sapo';
-        else if (r.url.includes('supercasa.pt')) portal = 'Supercasa';
-        else if (r.url.includes('olx.pt')) portal = 'OLX';
-        else if (r.url.includes('custojusto.pt')) portal = 'CustoJusto';
-
         const combined = `${r.title} ${r.snippet}`;
-        const priceMatch = combined.match(/(\d{1,3}(?:[.\s]\d{3})+|\d{4,6})\s*(?:€|euros?)/i);
-        let preco = 0;
-        if (priceMatch) {
-          preco = parseFloat(priceMatch[1].replace(/[.\s]/g, ''));
-        }
-
+        const preco = parsePriceEur(combined, { min: 15000, max: 2000000 });
         const tipMatch = combined.match(/\b(T[1-5]|V[1-5])\b/i);
-        const tip = tipMatch ? tipMatch[1].toUpperCase().replace('V', 'T') : (tipologia || 'T3');
-
+        const tip = tipMatch ? tipMatch[1].toUpperCase().replace('V', 'T') : tipologia || 'T3';
         const areaMatch = combined.match(/(\d{2,4})\s*m[²2]/i);
         const area = areaMatch ? parseFloat(areaMatch[1]) : 140;
 
@@ -367,249 +246,249 @@ export async function pesquisarMoradiasNovasPlataformas({ zona = 'Amarante', tip
           }
         }
 
-        const av = avaliarImovelCmvm({
-          precoAnunciado: preco,
-          areaUtil: area,
-          zona: freg,
-          tipologia: tip
-        });
+        const av = avaliarImovelCmvm({ precoAnunciado: preco, areaUtil: area, zona: freg });
+        let savedStatus = { isNovo: false, priceDropped: false, previousPrice: null };
+        if (preco > 0) {
+          savedStatus = guardarImovel({
+            titulo: r.title.slice(0, 85),
+            url: r.url,
+            portal: detectImmoPortal(r.url),
+            preco,
+            freguesia: freg,
+            tipologia: tip,
+            area_util: area
+          });
+        }
 
-        const imovelObj = {
+        resultados.push({
           titulo: r.title,
           url: r.url,
-          portal,
+          portal: detectImmoPortal(r.url),
           preco,
           freguesia: freg,
           tipologia: tip,
           area_util: area,
           valor_cmvm: av.valorIntrinseco,
           classificacao: av.classificacao,
-          snippet: r.snippet
-        };
-
-        // Guardar na base de dados para persistência e histórico
-        try {
-          if (preco > 0 || r.url.includes('moradia')) {
-            guardarImovel({
-              titulo: r.title.slice(0, 80),
-              url: r.url,
-              portal,
-              preco,
-              freguesia: freg,
-              tipologia: tip,
-              area_util: area
-            });
-          }
-        } catch (_) {}
-
-        resultados.push(imovelObj);
-      }
-    } catch (e) {
-      log.warn(`Erro na consulta web imobiliária (${q}):`, e.message);
-    }
-  }
-
-  // Resiliência de dados: se a pesquisa em tempo real for limitada por tráfego externo,
-  // recorrer ao catálogo verificado de Amarante para garantir 100% de disponibilidade
-  if (resultados.length === 0 && db) {
-    try {
-      const locais = db.prepare(`
-        SELECT * FROM imoveis 
-        WHERE (freguesia LIKE ? OR ? = '') 
-        AND (preco <= ? OR ? = 0)
-        ORDER BY id DESC LIMIT 5
-      `).all(`%${zona}%`, zona === 'Amarante' ? '' : zona, precoMax, precoMax);
-
-      for (const row of locais) {
-        resultados.push({
-          titulo: row.titulo,
-          url: row.url,
-          portal: row.portal || 'Base de Dados Amarante',
-          preco: row.preco,
-          freguesia: row.freguesia,
-          tipologia: row.tipologia,
-          area_util: row.area_util,
-          valor_cmvm: row.valor_cmvm,
-          classificacao: row.classificacao,
-          snippet: `Imóvel registado em ${row.freguesia} (${row.tipologia}) - Avaliação CMVM: ${Number(row.valor_cmvm || 0).toLocaleString('pt-PT')} €`
+          snippet: r.snippet,
+          isNovo: savedStatus.isNovo,
+          priceDropped: savedStatus.priceDropped,
+          previousPrice: savedStatus.previousPrice
         });
       }
     } catch (e) {
-      log.warn('Fallback para imoveis locais:', e.message);
+      log.warn(`Erro na pesquisa web imobiliária (${q}): ${e.message}`);
     }
   }
 
+  // Se nada novo veio da web, verificar histórico real guardado no SQLite
   if (resultados.length === 0) {
-    for (const site of IMMO_SITES.slice(0, 3)) {
-      const av = avaliarImovelCmvm({ precoAnunciado: precoMax, areaUtil: 160, zona });
-      resultados.push({
-        titulo: `Moradias Novas em ${zona} - ${site.nome}`,
-        url: site.searchUrl,
-        portal: site.nome,
-        preco: precoMax,
-        freguesia: zona,
-        tipologia: tipologia || 'T3',
-        area_util: 160,
-        valor_cmvm: av.valorIntrinseco,
-        classificacao: av.classificacao,
-        snippet: site.descricao
-      });
+    const stored = sqliteMasterDb.getRadarCasas(5);
+    for (const row of stored) {
+      if (!precoMax || row.preco <= precoMax) {
+        resultados.push({
+          ...row,
+          snippet: `Histórico CMVM verificado (${row.portal})`
+        });
+      }
     }
   }
 
   return resultados;
 }
 
-/**
- * Formata a lista de moradias novas em Markdown para o Telegram
- */
 export function formatarMoradiasNovasMarkdown(lista, zona = 'Amarante') {
   if (!lista || lista.length === 0) {
-    return (
-      `🏡 *RADAR DE MORADIAS NOVAS NAS PLATAFORMAS*\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `Não foram detetados novos anúncios no momento para *${zona}*.\n` +
-      `O radar de escuta continua ativo nos 12 portais de referência.`
-    );
+    let md = `🏡 *RADAR DE MORADIAS — ${zona.toUpperCase()}*\n`;
+    md += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    md += `Não foram extraídos preços individuais em tempo real neste momento (portais com bloqueio anti-bot temporário).\n\n`;
+    md += `🔗 *Pesquisa Direta Nos Portais Verificados (Zero Inventos):*\n`;
+    for (const site of IMMO_SITES.slice(0, 6)) {
+      md += `• [${site.nome}](${site.searchUrl})\n`;
+    }
+    return md;
   }
 
-  let md = `🏡 *RADAR ATIVO: MORADIAS NOVAS & EMPREENDIMENTOS*\n`;
-  md += `📍 *Região:* ${zona} | *Fontes:* Idealista, Imovirtual, RE/MAX, ERA, etc.\n`;
+  let md = `🏡 *RADAR ATIVO: MORADIAS EM ${zona.toUpperCase()}*\n`;
+  md += `📍 *Avaliação Automática CMVM | Zero Alucinações*\n`;
   md += `━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
   lista.slice(0, 6).forEach((item, idx) => {
-    const precoTxt = item.preco > 0 ? `*${Number(item.preco).toLocaleString('pt-PT')} €*` : '_Sob Consulta / Empreendimento_';
+    const precoTxt = item.preco > 0 ? `*${Number(item.preco).toLocaleString('pt-PT')} €*` : '_Consultar no portal_';
     const cmvmTxt = item.valor_cmvm ? ` (CMVM: ~${Number(item.valor_cmvm).toLocaleString('pt-PT')} €)` : '';
     md += `*${idx + 1}. [${item.titulo}](${item.url})*\n`;
-    md += `   🏢 *Portal:* ${item.portal} | 📍 *Zona:* ${item.freguesia} (${item.tipologia})\n`;
-    md += `   💰 *Preço:* ${precoTxt}${cmvmTxt}\n`;
-    if (item.snippet) {
-      md += `   📝 _"${item.snippet.slice(0, 140).replace(/\s+/g, ' ')}..."_\n`;
+    md += `   🏢 ${item.portal} | 📍 ${item.freguesia} (${item.tipologia}) | 💰 ${precoTxt}${cmvmTxt}\n`;
+    if (item.priceDropped && item.previousPrice) {
+      md += `   📉 *BAIXA DE PREÇO:* ${Number(item.previousPrice).toLocaleString('pt-PT')} € ➔ *${Number(item.preco).toLocaleString('pt-PT')} €*\n`;
     }
     md += `\n`;
   });
 
-  md += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-  md += `💡 *Ações:* Clica no link do anúncio para ver fotos e contacto, ou envia \`/avaliacao\` para calcular a margem de negociação bancária!`;
+  md += `💡 *Dica:* Usa \`/avaliacao [área] [zona] T3 [estado]\` ou \`${VERCEL_IMMO_APP.url}\``;
   return md;
 }
 
-/**
- * Varredura ativa nos portais e diretório de Amarante
- * Pesquisa em tempo real nas plataformas oficiais e guarda novidades na BD.
- */
 export async function executarVarreduraAmarante() {
-  log.info('A verificar atualizações de portais imobiliários em Amarante...');
   const liveResults = await pesquisarMoradiasNovasPlataformas({ zona: 'Amarante' });
-  const novosDetetados = liveResults.filter(i => i.preco > 0);
-
-  // Obter imóveis reais registados que ainda não tenham sido avaliados pela CMVM
-  if (db) {
-    const pendentes = db.prepare('SELECT * FROM imoveis WHERE valor_cmvm IS NULL OR valor_cmvm = 0').all();
-    for (const p of pendentes) {
-      try {
-        const { isNovo, imovel } = guardarImovel(p);
-        if (isNovo && !novosDetetados.some(d => d.url === imovel.url)) {
-          novosDetetados.push(imovel);
-        }
-      } catch (e) {
-        log.warn(`Erro ao reavaliar imóvel #${p.id}:`, e.message);
-      }
-    }
-
-    db.prepare('INSERT INTO radar_execucoes (novos_encontrados, total_varridos, status) VALUES (?, ?, ?)')
-      .run(novosDetetados.length, liveResults.length, 'sucesso');
-  }
-
-  log.info(`Varredura concluída. ${novosDetetados.length} novos imóveis verificados.`);
+  const novidades = liveResults.filter((i) => i.preco > 0 && (i.isNovo || i.priceDropped));
   return {
-    totalVarridos: (db ? db.prepare('SELECT count(*) as c FROM imoveis').get().c : 0) + liveResults.length,
-    novosDetetados: liveResults
+    totalVarridos: liveResults.length,
+    novosDetetados: liveResults.filter((i) => i.preco > 0),
+    alertas: novidades
   };
 }
 
 /**
- * Executa o ciclo de radar e dispara notificações e alertas ao utilizador
+ * Varre filtros ativos registados via /vigiar e gera alertas de preço atingido ou descida.
  */
-export async function dispararCicloRadarComAlertas(botInstance) {
-  if (!botInstance || !botInstance.telegram) return;
-  try {
-    const { novosDetetados } = await executarVarreduraAmarante();
-    const naoAlertados = obterImoveisNaoAlertados();
-    const paraAlertar = [...novosDetetados, ...naoAlertados.filter(n => !novosDetetados.some(d => d.id === n.id))];
+async function checkActiveWatchFilters() {
+  const filtros = sqliteMasterDb.getRadarFilters(true);
+  const alerts = [];
 
-    if (paraAlertar.length > 0) {
-      log.info(`A enviar alertas de ${paraAlertar.length} novos imóveis para o Telegram...`);
-      for (const item of paraAlertar) {
-        const alerta = formatarAlertaNovoImovel(item);
-        await botInstance.telegram.sendMessage(ANDRE_CHAT_ID, alerta.text, {
-          parse_mode: 'Markdown',
-          reply_markup: alerta.keyboard
-        }).catch(async () => {
-          // Fallback plain text se houver erro de parsing
-          await botInstance.telegram.sendMessage(ANDRE_CHAT_ID, alerta.text.replace(/[*_`]/g, ''), {
-            reply_markup: alerta.keyboard
-          }).catch(() => {});
-        });
+  for (const f of filtros.slice(0, 8)) {
+    const query = f.url ? `site:${f.url.replace(/^https?:\/\//, '').split('/')[0]} ${f.termo}` : f.termo;
+    const scanRes = await runWebFrontSearch({
+      queries: [query],
+      maxPerQuery: 3,
+      parseHit: (hit) => {
+        const preco = parsePriceEur(`${hit.title} ${hit.snippet}`, { min: 5, max: 2000000 });
+        return { titulo: hit.title, url: hit.url, preco };
       }
-      marcarAlertados(paraAlertar.map(p => p.id));
+    });
+
+    const priced = scanRes.items.filter((i) => i.preco > 0).sort((a, b) => a.preco - b.preco);
+    const best = priced[0];
+    if (!best) continue;
+
+    const hitTarget = f.preco_alvo && best.preco <= f.preco_alvo;
+    const dropped = f.ultimo_preco && best.preco < f.ultimo_preco;
+
+    if (hitTarget || dropped || !f.ultimo_preco) {
+      sqliteMasterDb.updateRadarFilterPrice(f.id, best.preco);
+      if (hitTarget || dropped) {
+        alerts.push({ filter: f, best, hitTarget, dropped });
+      }
     }
-  } catch (err) {
-    log.error('Erro no ciclo de radar com alertas:', err.message);
   }
+  return alerts;
 }
 
 /**
- * Inicia o agendador de pesquisas durante o dia
- * Executa de 4 em 4 horas (ex: 08:30, 12:30, 16:30, 20:30)
+ * Varredura silenciosa das 5 Frentes + Filtros /vigiar.
+ * Envia alertas Telegram APENAS quando existem novidades reais ou baixas de preço!
+ */
+export async function dispararCicloRadarComAlertas(botInstance) {
+  log.info('📡 A executar varredura silenciosa Multi-Frente (5 Frentes)...');
+  try {
+    const [casasRes, autosRes, techRes, amazonRes, appleRes, filterAlerts] = await Promise.all([
+      executarVarreduraAmarante(),
+      scanAutos(),
+      scanTech(),
+      scanAmazon(),
+      scanApple(),
+      checkActiveWatchFilters()
+    ]);
+
+    const novosImmo = obterImoveisNaoAlertados();
+    if (novosImmo.length > 0 && botInstance) {
+      for (const item of novosImmo.slice(0, 3)) {
+        const header =
+          item.preco_anterior && item.preco < item.preco_anterior
+            ? `📉 *BAIXA DE PREÇO IMOBILIÁRIO EM AMARANTE!*\n`
+            : `🚨 *NOVO ANÚNCIO IMOBILIÁRIO EM AMARANTE!*\n`;
+        const alerta = formatarAlertaNovoImovel(item, header);
+        await sendRadarTelegramAlert(botInstance, alerta.text, alerta.keyboard);
+      }
+      marcarAlertados(novosImmo.map((p) => p.id));
+    }
+
+    const frontAlerts = [
+      ...autosRes.alerts.slice(0, 2).map((a) => `🚗 *CARRO (${a.priceDropped ? 'BAIXA DE PREÇO' : 'NOVO'}):* [${a.marca_modelo}](${a.url}) — *${a.preco} €* (${a.portal})`),
+      ...techRes.alerts.slice(0, 2).map((a) => `💻 *TECH (${a.priceDropped ? 'BAIXA' : 'NOVO'}):* [${a.produto}](${a.url}) — *${a.preco} €* (${a.loja})`),
+      ...amazonRes.alerts.slice(0, 2).map((a) => `📦 *AMAZON (${a.priceDropped ? 'BAIXA' : 'OFERTA'}):* [${a.titulo}](${a.url}) — *${a.preco} €*`),
+      ...appleRes.alerts.slice(0, 2).map((a) => `🍎 *APPLE (${a.condicao}):* [${a.modelo}](${a.url}) — *${a.preco} €* (${a.loja})`),
+      ...filterAlerts.map((fa) => `🎯 *ALERTA \`/vigiar\` (${fa.filter.termo}):* [${fa.best.titulo}](${fa.best.url}) — *${fa.best.preco} €*${fa.filter.preco_alvo ? ` (alvo <= ${fa.filter.preco_alvo} €)` : ''}`)
+    ];
+
+    if (frontAlerts.length > 0 && botInstance) {
+      const msg =
+        `🔔 *RADAR 5 FRENTES — OPORTUNIDADES & BAIXAS DE PREÇO*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        frontAlerts.join('\n\n');
+      await sendRadarTelegramAlert(botInstance, msg);
+    }
+
+    const totalScanned =
+      (casasRes.totalVarridos || 0) +
+      (autosRes.scanned || 0) +
+      (techRes.scanned || 0) +
+      (amazonRes.scanned || 0) +
+      (appleRes.scanned || 0);
+    const alertasEnviados = novosImmo.length + frontAlerts.length;
+
+    try {
+      sqliteMasterDb.recordRadarExecution({
+        frente: 'multi_frente_5',
+        totalScanned,
+        newAlerts: alertasEnviados,
+        status: 'ok'
+      });
+    } catch {}
+
+    return {
+      casas: casasRes.totalVarridos,
+      carros: autosRes.scanned,
+      tech: techRes.scanned,
+      amazon: amazonRes.scanned,
+      apple: appleRes.scanned,
+      alertasEnviados
+    };
+  } catch (err) {
+    try {
+      sqliteMasterDb.recordRadarExecution({ frente: 'multi_frente_5', totalScanned: 0, newAlerts: 0, status: `error:${err.message}` });
+    } catch {}
+    log.error('Erro no ciclo Multi-Frente:', err.message);
+    return { alertasEnviados: 0, error: err.message };
+  }
+}
+
+let lastMorningReportDay = null;
+let last4hWindowKey = null;
+
+/**
+ * Agendador Europe/Lisbon: Relatório Diário 5 Frentes às 08:30 + Varredura Silenciosa a cada 4h (08h-22h).
  */
 export function iniciarAgendadorRadar(botInstance) {
   if (!botInstance) return;
-  log.info('⏰ Agendador de Pesquisas Diárias de Imóveis ativado (verificações diárias às 08:30, 13:30, 18:30 e a cada 4 horas).');
+  log.info('⏰ Agendador Multi-Frente (5 Frentes) ativado (08h30 Europe/Lisbon + 4h em 4h entre 08h-22h).');
 
-  // Intervalo de verificação contínua de 4 horas (14.400.000 ms)
-  const INTERVALO_MS = 4 * 60 * 60 * 1000;
   setInterval(() => {
-    const hora = new Date().getHours();
-    // Executa apenas em horário diurno e de atividade (08h às 22h)
-    if (hora >= 8 && hora <= 22) {
-      log.info('⏰ Disparo automático periódico do Radar de Imóveis...');
-      dispararCicloRadarComAlertas(botInstance);
-    }
-  }, INTERVALO_MS);
+    const { hour, minute, dayKey } = getLisbonTimeParts();
 
-  // Verificação diária matinal às 08:30 (Relatório do dia)
-  setInterval(() => {
-    const agora = new Date();
-    if (agora.getHours() === 8 && agora.getMinutes() === 30) {
-      log.info('☀️ A enviar Relatório Matinal de Imóveis de Amarante...');
-      const relatorio = gerarRelatorioDiarioMarkdown();
-      botInstance.telegram.sendMessage(ANDRE_CHAT_ID, relatorio, {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🏠 Abrir ImmoEval Vercel', web_app: { url: VERCEL_IMMO_APP.url } }],
-            [{ text: '📡 Pesquisar Mais Agora', callback_data: 'immo_radar_scan' }]
-          ]
-        }
-      }).catch(() => {
-        botInstance.telegram.sendMessage(ANDRE_CHAT_ID, relatorio.replace(/[*_`]/g, '')).catch(() => {});
+    // 1. Relatório Diário Consolidado às 08:30 (Lisboa)
+    if (hour === 8 && minute === 30 && lastMorningReportDay !== dayKey) {
+      lastMorningReportDay = dayKey;
+      log.info('☀️ A enviar Relatório Matinal Multi-Frente (08:30 Europe/Lisbon)...');
+      const relatorio = gerarRelatorioMultiFrenteMarkdown();
+      sendRadarTelegramAlert(botInstance, relatorio, {
+        inline_keyboard: [
+          [{ text: '🏠 Abrir ImmoEval Vercel', web_app: { url: VERCEL_IMMO_APP.url } }],
+          [{ text: '📡 Varrer 5 Frentes Agora', callback_data: 'immo_radar_scan' }]
+        ]
       });
     }
-  }, 60 * 1000);
+
+    // 2. Varredura silenciosa de 4 em 4 horas (08h, 12h, 16h, 20h aos :05)
+    const slotKey = `${dayKey}_${hour}`;
+    if ([8, 12, 16, 20].includes(hour) && minute === 5 && last4hWindowKey !== slotKey) {
+      last4hWindowKey = slotKey;
+      dispararCicloRadarComAlertas(botInstance);
+    }
+  }, 60 * 1000).unref();
 }
 
 export function checkpointImmoDb() {
-  if (db && db.open) {
-    try {
-      db.pragma('wal_checkpoint(FULL)');
-      log.info('Checkpoint WAL executado em imoveis_amarante.db com sucesso.');
-      return true;
-    } catch (err) {
-      log.warn('Erro ao executar checkpoint WAL:', err.message);
-    }
-  }
-  return false;
+  return checkpointMasterDb();
 }
 
 export default {
@@ -617,12 +496,15 @@ export default {
   guardarImovel,
   listarImoveis,
   obterImoveisNaoAlertados,
+  marcarAlertados,
   obterOportunidades,
   formatarAlertaNovoImovel,
   gerarRelatorioDiarioMarkdown,
+  gerarRelatorioMultiFrenteMarkdown,
   executarVarreduraAmarante,
   pesquisarMoradiasNovasPlataformas,
   formatarMoradiasNovasMarkdown,
   dispararCicloRadarComAlertas,
-  iniciarAgendadorRadar
+  iniciarAgendadorRadar,
+  formatarAvaliacaoMarkdown
 };

@@ -24,6 +24,6 @@ EXPOSE 3000
 ENV NODE_ENV=production
 ENV PORT=3000
 
-# Executar o orquestrador dos 5 bots
+# Executar o @AndrePinheirobot 100% Cloud-Native
 CMD ["node", "index.js"]
 

@@ -1,14 +1,13 @@
-// src/workers/worker_geral.js — Assistente Pessoal & Mini App Família sincronizada
-import axios from 'axios';
-import { familyDb } from '../shared/familyDb.js';
+// src/workers/worker_geral.js — Assistente Pessoal, Família, Lembretes & Notícias Certificadas
+import { sqliteMasterDb } from '../shared/sqliteMasterDb.js';
 import { createLogger } from '../utils/logger.js';
 import { askAgent } from '../services/reasoningService.js';
 import { searchLiveWeb } from '../shared/webSearch.js';
 import { getEmailBriefing, fetchRecentEmails, summarizeEmailWithAI, getEmailStatus } from '../services/emailService.js';
 import { obterPostosMaisBaratos, formatarCombustiveisMarkdown } from '../services/combustiveisService.js';
+import { getDailyNewsBriefing, getRegionalNews, getGovNews } from '../services/newsService.js';
 
 const log = createLogger('WorkerGeral');
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
 function dataHora() {
   return new Date().toLocaleString('pt-PT', { timeZone: 'Europe/Lisbon', hour12: false });
@@ -17,7 +16,7 @@ function dataHora() {
 // ─── Compras ─────────────────────────────────────────────────────────────────
 
 function handleCompras(args, subCmd) {
-  const shopping = familyDb.getShopping();
+  const shopping = sqliteMasterDb.getShopping();
 
   if (subCmd === 'ver' || (!args && subCmd !== 'limpar')) {
     if (shopping.length === 0) {
@@ -30,8 +29,8 @@ function handleCompras(args, subCmd) {
 
   if (subCmd === 'adicionar' && args) {
     const items = args.split(',').map(s => s.trim()).filter(Boolean);
-    const criados = items.map(nome => familyDb.addShopping(nome, 'geral', { first_name: 'André' }));
-    return `✅ Adicionado à lista de compras: *${items.join(', ')}*\n\nTotal na lista: ${familyDb.getShopping().length} items`;
+    const criados = items.map(nome => sqliteMasterDb.addShopping(nome, 'geral', { first_name: 'André' }));
+    return `✅ Adicionado à lista de compras: *${items.join(', ')}*\n\nTotal na lista: ${sqliteMasterDb.getShopping().length} items`;
   }
 
   if (subCmd === 'remover' && args) {
@@ -40,7 +39,7 @@ function handleCompras(args, subCmd) {
       return '❌ Número inválido. Consulta a lista com `/compras`';
     }
     const item = shopping[idx];
-    familyDb.deleteShopping(item.id);
+    sqliteMasterDb.deleteShopping(item.id);
     return `🗑️ Removido das compras: *${item.item_text}*`;
   }
 
@@ -48,7 +47,7 @@ function handleCompras(args, subCmd) {
     const idx = parseInt(args) - 1;
     if (!isNaN(idx) && idx >= 0 && idx < shopping.length) {
       const item = shopping[idx];
-      familyDb.toggleShopping(item.id, !item.completed);
+      sqliteMasterDb.toggleShopping(item.id, !item.completed);
       const icon = !item.completed ? '✅' : '☐';
       return `${icon} *${item.item_text}* marcado como ${!item.completed ? 'comprado' : 'por comprar'}`;
     }
@@ -56,7 +55,7 @@ function handleCompras(args, subCmd) {
   }
 
   if (subCmd === 'limpar') {
-    familyDb.clearCompletedShopping();
+    sqliteMasterDb.clearCompletedShopping();
     return '🗑️ Compras concluídas foram removidas com sucesso.';
   }
 
@@ -66,7 +65,7 @@ function handleCompras(args, subCmd) {
 // ─── Tarefas ─────────────────────────────────────────────────────────────────
 
 function handleTarefas(args, subCmd) {
-  const tasks = familyDb.getTasks();
+  const tasks = sqliteMasterDb.getTasks();
 
   if (subCmd === 'ver' || (!args && subCmd !== 'limpar')) {
     if (tasks.length === 0) return '📋 Sem tarefas registadas.\n\nAdiciona com: `/tarefa Comprar bilhetes`';
@@ -84,7 +83,7 @@ function handleTarefas(args, subCmd) {
   }
 
   if (args && subCmd !== 'limpar') {
-    const task = familyDb.addTask(args, 'André', { first_name: 'André' });
+    const task = sqliteMasterDb.addTask(args, 'André', { first_name: 'André' });
     return `✅ Tarefa adicionada: *"${task.title}"*\n\nSincronizada com a Mini App Família.`;
   }
 
@@ -94,7 +93,7 @@ function handleTarefas(args, subCmd) {
 // ─── Carolina (Escola, Faltas, Consultas, Actividades) ──────────────────────
 
 function handleCarolina(args) {
-  const logs = familyDb.getBabyLogs();
+  const logs = sqliteMasterDb.getBabyLogs();
 
   if (!args || args.trim().length === 0) {
     if (logs.length === 0) {
@@ -119,14 +118,14 @@ function handleCarolina(args) {
   if (/falta|atraso|escola/.test(tipo)) eventType = 'faltas';
   else if (/consulta|medico|médico|pediatra|saude|saúde/.test(tipo)) eventType = 'consultas';
 
-  const criado = familyDb.addBabyLog(eventType, detalhes, '', { first_name: 'André' });
+  const criado = sqliteMasterDb.addBabyLog(eventType, detalhes, '', { first_name: 'André' });
   return `👧 *Registo da Carolina Guardado!*\n\nTipo: \`${criado.event_type}\`\nDetalhes: *${criado.details}*\nData: _${dataHora()}_\n\nSincronizado automaticamente com a Mini App Família.`;
 }
 
 // ─── Notas ───────────────────────────────────────────────────────────────────
 
 function handleNotas(args) {
-  const notes = familyDb.getNotes();
+  const notes = sqliteMasterDb.getNotes();
 
   if (!args || args.trim().length === 0) {
     if (notes.length === 0) return '📝 Sem notas guardadas.\n\nAdiciona com: `/nota Ideia nova`';
@@ -134,16 +133,16 @@ function handleNotas(args) {
     return `📝 *Notas Rápidas:*\n\n${lista}`;
   }
 
-  const nota = familyDb.addNote('Nota Rápida', args, 'blue', { first_name: 'André' });
+  const nota = sqliteMasterDb.addNote('Nota Rápida', args, 'blue', { first_name: 'André' });
   return `📝 Nota guardada com sucesso:\n*"${nota.content}"*`;
 }
 
 // ─── Briefing Diário Integrado ──────────────────────────────────────────────
 
 async function handleBriefing() {
-  const shopping = familyDb.getShopping();
-  const tasks = familyDb.getTasks();
-  const carolinaLogs = familyDb.getBabyLogs();
+  const shopping = sqliteMasterDb.getShopping();
+  const tasks = sqliteMasterDb.getTasks();
+  const carolinaLogs = sqliteMasterDb.getBabyLogs();
   const agora = dataHora();
 
   const comprasPendentes = shopping.filter(c => !c.completed);
@@ -219,7 +218,7 @@ function handleProteina(input) {
   const desc = match[2] || 'Refeição registada';
   const meta = 160;
 
-  familyDb.addNote('🍗 Proteína', `${grams}g - ${desc}`, 'emerald', { first_name: 'André' });
+  sqliteMasterDb.addNote('🍗 Proteína', `${grams}g - ${desc}`, 'emerald', { first_name: 'André' });
 
   return `🍗 *Registo Nutricional Guardado!*\n\n` +
     `• Refeição: *${desc}* (+${grams}g Proteína)\n` +
@@ -228,6 +227,24 @@ function handleProteina(input) {
 }
 
 // ─── Lembretes Proativos ───────────────────────────────────────────────────
+
+function buildLisbonDate(daysOffset, hours, minutes) {
+  const base = new Date(Date.now() + daysOffset * 86400000);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Lisbon',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(base).reduce((acc, p) => {
+    acc[p.type] = p.value;
+    return acc;
+  }, {});
+  const utcGuess = new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), hours, minutes, 0));
+  const lisbonStr = utcGuess.toLocaleString('en-US', { timeZone: 'Europe/Lisbon', hour12: false });
+  const utcStr = utcGuess.toLocaleString('en-US', { timeZone: 'UTC', hour12: false });
+  const diffMs = new Date(lisbonStr).getTime() - new Date(utcStr).getTime();
+  return new Date(utcGuess.getTime() - diffMs);
+}
 
 export function parseReminderInput(input) {
   const now = new Date();
@@ -247,7 +264,7 @@ export function parseReminderInput(input) {
     return { triggerAt, text: text.trim() };
   }
 
-  // 2. Horário fixo hoje ou amanhã: "16:30 ligar ao médico", "às 16h30 ligar ao médico", "amanhã às 10:00..."
+  // 2. Horário fixo em fuso horário Europe/Lisbon
   const isAmanha = /amanh[aã]/i.test(trimmed);
   const clean = trimmed.replace(/(?:^|\s)amanh[aã](?:\s|$)/gi, ' ').trim();
   const timeMatch = clean.match(/^(?:(?:às|as)\s+)?(\d{1,2})(?:[:hH](\d{2}))?\s*(?:h|horas)?(?:\s+(?:de\s+|para\s+)?(.+))?$/i);
@@ -257,13 +274,9 @@ export function parseReminderInput(input) {
     const text = (timeMatch[3] || 'Lembrete').trim();
 
     if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
-      const target = new Date();
-      if (isAmanha) {
-        target.setDate(target.getDate() + 1);
-      }
-      target.setHours(hours, minutes, 0, 0);
+      let target = buildLisbonDate(isAmanha ? 1 : 0, hours, minutes);
       if (!isAmanha && target.getTime() <= now.getTime()) {
-        target.setDate(target.getDate() + 1);
+        target = buildLisbonDate(1, hours, minutes);
       }
       return { triggerAt: target, text };
     }
@@ -283,7 +296,7 @@ function handleLembretes(rawInput, ctx) {
   // Subcomando apagar / remover
   if (/^(apagar|remover|del)\s+/i.test(input)) {
     const idOrNum = input.replace(/^(apagar|remover|del)\s+/i, '').trim();
-    const reminders = (familyDb.getReminders() || []).filter(r => !r.sent);
+    const reminders = (sqliteMasterDb.getReminders() || []).filter(r => !r.sent);
     const idx = parseInt(idOrNum, 10) - 1;
     let target = null;
     if (!isNaN(idx) && idx >= 0 && idx < reminders.length) {
@@ -292,7 +305,7 @@ function handleLembretes(rawInput, ctx) {
       target = reminders.find(r => r.id === idOrNum);
     }
     if (target) {
-      familyDb.deleteReminder(target.id);
+      sqliteMasterDb.deleteReminder(target.id);
       return `🗑️ Lembrete *"${target.text}"* cancelado com sucesso.`;
     }
     return `❌ Lembrete não encontrado. Usa \`/lembretes\` para ver a lista.`;
@@ -300,7 +313,7 @@ function handleLembretes(rawInput, ctx) {
 
   // Listar lembretes
   if (!input || input === 'ver' || input === 'listar') {
-    const pending = (familyDb.getReminders() || []).filter(r => !r.sent).sort((a, b) => new Date(a.trigger_at) - new Date(b.trigger_at));
+    const pending = (sqliteMasterDb.getReminders() || []).filter(r => !r.sent).sort((a, b) => new Date(a.trigger_at) - new Date(b.trigger_at));
     if (pending.length === 0) {
       return `🔔 *Lembretes Proativos*\n\nNão tens nenhum lembrete ativo agendado.\n\nPara agendar:\n• \`/lembrete às 16:30 Ligar ao engenheiro\`\n• \`/lembrete daqui a 20 min Tirar o pão\`\n• \`/lembrete amanhã às 09:00 Rever orçamento\``;
     }
@@ -315,7 +328,7 @@ function handleLembretes(rawInput, ctx) {
 
   // Criar novo lembrete
   const parsed = parseReminderInput(input);
-  const reminder = familyDb.addReminder({
+  const reminder = sqliteMasterDb.addReminder({
     text: parsed.text,
     triggerAt: parsed.triggerAt,
     chatId,
@@ -351,11 +364,23 @@ export async function handle(text, ctx = {}) {
   }
 
   if (/^\/(briefing|resumo|dia)\b/i.test(trimmed)) return handleBriefing();
-  if (/^\/(nutricao|dieta|macros)\b/i.test(trimmed)) return handleNutricao();
   if (/^\/ergonomia\b/i.test(trimmed)) return handleErgonomia();
-  if (/^\/proteina\b/i.test(trimmed)) {
-    const raw = trimmed.replace(/^\/proteina\s*/i, '').trim();
-    return handleProteina(raw);
+
+  // Notícias Certificadas & Oficiais (ERC / Portugal.gov / Amarante)
+  if (/^\/(noticias_regiao|amarante)\b/i.test(trimmed)) {
+    return await getRegionalNews();
+  }
+  if (/^\/(governo|leis)\b/i.test(trimmed)) {
+    return await getGovNews();
+  }
+  if (/^\/noticias?\b/i.test(trimmed) || /\b([uú]ltimas\s+not[ií]cias|not[ií]cias\s+de\s+hoje|briefing\s+not[ií]cias)\b/i.test(trimmed)) {
+    return await getDailyNewsBriefing();
+  }
+
+  // Nutrição & Receitas Saudáveis (Delegação direta no Worker Nutrição SQLite)
+  if (/^\/(nutricao|dieta|macros|plano|hoje|proteina|agua|creatina|receita|receita_airfryer|receita_mcc)\b/i.test(trimmed)) {
+    const { handle: handleNutri } = await import('./worker_nutricao.js');
+    return await handleNutri(trimmed, ctx);
   }
 
   if (/^\/(compras?)\b/i.test(trimmed)) {
@@ -381,9 +406,9 @@ export async function handle(text, ctx = {}) {
     return handleNotas(args);
   }
 
-  // ─── Imobiliário & Moradias Novas (Delegação Transparente) ────────────────
+  // ─── Radar Multi-Frente 5 Frentes (Delegação Transparente) ────────────────
   if (
-    /^\/(moradias?_novas?|moradias?|imoveis|radar|avaliacao|avaliar)\b/i.test(trimmed) ||
+    /^\/(moradias?_novas?|moradias?|casas|imoveis|radar|avaliacao|avaliar|carros?|tech|amazon|ofertas?|apple|iphone_preco|apple_refurb|vigiar|meus_alertas)\b/i.test(trimmed) ||
     /\b(moradias?\s+novas?|pesquisar?\s+moradias?|casas?\s+novas?|avaliar\s+im[oó]vel|radar\s+imobili[aá]rio)\b/i.test(trimmed)
   ) {
     const { handle: handleImmo } = await import('./worker_immo.js');
@@ -453,6 +478,22 @@ export async function handle(text, ctx = {}) {
       if (r.snippet) txt += `   ${r.snippet.slice(0, 150)}...\n\n`;
     });
     txt += `━━━━━━━━━━━━━━━━━━━━━━━━`;
+    return txt;
+  }
+
+  if (/^\/farmacias?\b/i.test(trimmed) || /\bfarm[aá]cias?\s+de\s+servi[cç]o\b/i.test(trimmed)) {
+    const loc = trimmed.replace(/^\/farmacias?\s*/i, '').trim() || 'Amarante';
+    const results = await searchLiveWeb(`farmacias de servico ${loc} hoje`, 4);
+    let txt = `💊 *FARMÁCIAS DE SERVIÇO — ${loc.toUpperCase()}*\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    if (results.length === 0) {
+      txt += `Sem resultados em pesquisa web direta neste instante.\n`;
+    } else {
+      results.forEach((r, idx) => {
+        txt += `*${idx + 1}.* [${r.title}](${r.url})\n`;
+        if (r.snippet) txt += `   _${r.snippet.slice(0, 140)}_\n\n`;
+      });
+    }
+    txt += `🔗 Consulta oficial: https://www.farmaciasportuguesas.pt/farmacias-de-servico`;
     return txt;
   }
 

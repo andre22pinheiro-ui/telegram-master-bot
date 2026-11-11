@@ -1,5 +1,5 @@
 // src/shared/familyRoutes.js — Rotas REST para sincronização com a Mini App Gestão Familiar
-import { familyDb } from './familyDb.js';
+import { sqliteMasterDb } from './sqliteMasterDb.js';
 import { validateTelegramWebAppData } from './telegramAuth.js';
 
 export function handleFamilyApi(req, res, urlPath, method) {
@@ -30,7 +30,7 @@ export function handleFamilyApi(req, res, urlPath, method) {
   // ─── 1. COMPRAS (/api/family/shopping) ──────────────────────────────────
   if (urlPath === '/api/family/shopping') {
     if (method === 'GET') {
-      const data = familyDb.getShopping();
+      const data = sqliteMasterDb.getShopping();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(data));
       return true;
@@ -44,7 +44,7 @@ export function handleFamilyApi(req, res, urlPath, method) {
           const itemText = parsed.itemText || parsed.item_text || parsed.text || '';
           const category = parsed.category || 'geral';
           const user = parsed.user || {};
-          const created = familyDb.addShopping(itemText, category, user);
+          const created = sqliteMasterDb.addShopping(itemText, category, user);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true, item: created }));
         } catch (err) {
@@ -64,7 +64,7 @@ export function handleFamilyApi(req, res, urlPath, method) {
     req.on('end', () => {
       try {
         const parsed = JSON.parse(body || '{}');
-        familyDb.toggleShopping(id, parsed.completed);
+        sqliteMasterDb.toggleShopping(id, parsed.completed);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
       } catch (err) {
@@ -78,7 +78,7 @@ export function handleFamilyApi(req, res, urlPath, method) {
   const deleteShoppingMatch = urlPath.match(/^\/api\/family\/shopping\/([^/]+)$/);
   if (deleteShoppingMatch && method === 'DELETE') {
     const id = deleteShoppingMatch[1];
-    familyDb.deleteShopping(id);
+    sqliteMasterDb.deleteShopping(id);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: true }));
     return true;
@@ -87,7 +87,7 @@ export function handleFamilyApi(req, res, urlPath, method) {
   // ─── 2. TAREFAS (/api/family/tasks) ────────────────────────────────────
   if (urlPath === '/api/family/tasks') {
     if (method === 'GET') {
-      const data = familyDb.getTasks();
+      const data = sqliteMasterDb.getTasks();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(data));
       return true;
@@ -101,7 +101,7 @@ export function handleFamilyApi(req, res, urlPath, method) {
           const title = parsed.title || parsed.task || '';
           const assignedTo = parsed.assignedTo || parsed.assigned_to || 'Ambos';
           const user = parsed.user || {};
-          const created = familyDb.addTask(title, assignedTo, user);
+          const created = sqliteMasterDb.addTask(title, assignedTo, user);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true, task: created }));
         } catch (err) {
@@ -121,7 +121,7 @@ export function handleFamilyApi(req, res, urlPath, method) {
     req.on('end', () => {
       try {
         const parsed = JSON.parse(body || '{}');
-        familyDb.toggleTask(id, parsed.completed);
+        sqliteMasterDb.toggleTask(id, parsed.completed);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
       } catch (err) {
@@ -135,7 +135,7 @@ export function handleFamilyApi(req, res, urlPath, method) {
   const deleteTaskMatch = urlPath.match(/^\/api\/family\/tasks\/([^/]+)$/);
   if (deleteTaskMatch && method === 'DELETE') {
     const id = deleteTaskMatch[1];
-    familyDb.deleteTask(id);
+    sqliteMasterDb.deleteTask(id);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: true }));
     return true;
@@ -144,7 +144,7 @@ export function handleFamilyApi(req, res, urlPath, method) {
   // ─── 3. CAROLINA / BEBÉ (/api/family/baby) ──────────────────────────────
   if (urlPath === '/api/family/baby') {
     if (method === 'GET') {
-      const data = familyDb.getBabyLogs();
+      const data = sqliteMasterDb.getBabyLogs();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(data));
       return true;
@@ -159,7 +159,7 @@ export function handleFamilyApi(req, res, urlPath, method) {
           const details = parsed.details || '';
           const notes = parsed.notes || '';
           const user = parsed.user || {};
-          const created = familyDb.addBabyLog(eventType, details, notes, user);
+          const created = sqliteMasterDb.addBabyLog(eventType, details, notes, user);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true, log: created }));
         } catch (err) {
@@ -174,7 +174,7 @@ export function handleFamilyApi(req, res, urlPath, method) {
   const deleteBabyMatch = urlPath.match(/^\/api\/family\/baby\/([^/]+)$/);
   if (deleteBabyMatch && method === 'DELETE') {
     const id = deleteBabyMatch[1];
-    familyDb.deleteBabyLog(id);
+    sqliteMasterDb.deleteBabyLog(id);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: true }));
     return true;
@@ -183,7 +183,7 @@ export function handleFamilyApi(req, res, urlPath, method) {
   // ─── 4. NOTAS (/api/family/notes) ──────────────────────────────────────
   if (urlPath === '/api/family/notes') {
     if (method === 'GET') {
-      const data = familyDb.getNotes();
+      const data = sqliteMasterDb.getNotes();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(data));
       return true;
@@ -198,7 +198,7 @@ export function handleFamilyApi(req, res, urlPath, method) {
           const content = parsed.content || '';
           const colorTag = parsed.colorTag || parsed.color_tag || 'blue';
           const user = parsed.user || {};
-          const created = familyDb.addNote(title, content, colorTag, user);
+          const created = sqliteMasterDb.addNote(title, content, colorTag, user);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true, note: created }));
         } catch (err) {
@@ -213,7 +213,7 @@ export function handleFamilyApi(req, res, urlPath, method) {
   const deleteNoteMatch = urlPath.match(/^\/api\/family\/notes\/([^/]+)$/);
   if (deleteNoteMatch && method === 'DELETE') {
     const id = deleteNoteMatch[1];
-    familyDb.deleteNote(id);
+    sqliteMasterDb.deleteNote(id);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ success: true }));
     return true;

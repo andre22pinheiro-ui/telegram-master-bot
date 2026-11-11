@@ -1,6 +1,6 @@
 import "dotenv/config";
 
-const GEMINI_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 
 // Analisa imagem recebida via Buffer usando Gemini Multimodal Vision
 export async function analyzeImageBuffer(imageBuffer, mimeType = "image/jpeg", prompt = "") {

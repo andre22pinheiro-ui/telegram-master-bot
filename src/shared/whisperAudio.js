@@ -16,7 +16,7 @@ export async function transcribeTelegramAudio(ctx) {
     return null;
   }
 
-  const groqKey = process.env.GROQ_API_KEY;
+  const groqKey = process.env.GROQ_API_KEY || '';
   if (!groqKey) {
     log.error('GROQ_API_KEY não configurada para transcrição de áudio.');
     return null;

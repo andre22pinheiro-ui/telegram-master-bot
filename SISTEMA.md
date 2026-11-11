@@ -1,305 +1,188 @@
-# Documento Mestre de Arquitetura e Operação do Sistema (`telegram-master-bot`)
+# Documento Mestre de Arquitetura e Operação do Sistema (100% Cloud-Native)
 
-> **Documento Canónico do Ecossistema Unificado**  
-> **Serviço Principal (Nuvem 24/7):** [`https://telegram-master-bot-0h2h.onrender.com`](https://telegram-master-bot-0h2h.onrender.com)  
-> **Runtime:** Node.js ESM (`>=18.0.0`, Docker `node:20-alpine` no Render)  
-> **Fuso Horário Operacional:** `Europe/Lisbon`
+> **Documento Canónico — Arquitetura 100% Cloud-Native (Zero Dependência de PC Local)**  
+> **Serviço Pessoal Nuvem 24/7:** [`https://telegram-master-bot-0h2h.onrender.com`](https://telegram-master-bot-0h2h.onrender.com)  
+> **Bot Único Pessoal:** `@AndrePinheirobot` (Webhook `POST /webhook/master`, `:3000`)  
+> **Bot Único Empresarial:** `@zeropaperfrotaBot` (`zeropaper-frota-bot`, Webhook `POST /webhook/frota`, `TELEGRAM_FROTAS_TOKEN`)  
+> **Runtime:** Node.js ESM (`>=20.0.0`, Docker `node:20-alpine` no Render) | **Fuso Horário:** `Europe/Lisbon`
 
 ---
 
-## 1. Visão Geral do Ecossistema
+## 1. Visão Geral e Separação Estrita de Domínios
 
-O sistema é composto por um **orquestrador central em produção 24/7 no Render** (`telegram-master-bot`) que agrega **6 bots especializados do Telegram**, um **motor de IA determinístico (`temperature: 0.0`)**, APIs oficiais e em tempo real, uma **API REST familiar**, e integrações bidirecionais com **dois serviços companheiros** (`zeropaper-frota-bot` e `whatsapp-dev-assistant`) e **9 Mini Apps Web alojadas no Vercel**.
+O ecossistema executa **100% na nuvem (Render + Vercel + GitHub Actions + Google Drive + Supabase)** com **separação absoluta entre vida pessoal/familiar e operações empresariais de frotas**:
 
 ```mermaid
 flowchart TB
-  User["Utilizador (Telegram / WhatsApp / WebApp)"] -->|"Webhooks HTTPS"| Render["telegram-master-bot (Render 24/7 :3000)"]
-  User -->|"Mensagens / Painel :3333"| WA["whatsapp-dev-assistant (PC Surface)"]
-  User -->|"Bot Dedicado AppFrota :3001"| ZP["zeropaper-frota-bot (@zeropaperfrotaBot)"]
+  User["André / Família (Telegram / Mini Apps Vercel)"] -->|"Webhook HTTPS /webhook/master"| Master["telegram-master-bot (@AndrePinheirobot :3000)"]
+  FleetUser["André / Motoristas (Telegram Frotas)"] -->|"Webhook HTTPS /webhook/frota"| ZP["zeropaper-frota-bot (@zeropaperfrotaBot)"]
 
-  subgraph Orchestrator["Orquestrador Unificado (index.js)"]
-    Router["Roteador & IntentRouter + ZeroPaperDispatcher"]
-    Bots["6 Bots Telegram: Master, Dev, Frotas, Immo, Pessoal, Nutrição"]
-    Workers["5 Workers Especializados + Master AI"]
-    IA["ReasoningService (temp 0.0) + Vision + Whisper"]
-    API["Express / HTTP API (/health, /webapp, /api/family, /api/sync)"]
+  subgraph PersonalCore["Domínio Exclusivo Pessoal & Familiar (SQLite WAL + Google Drive)"]
+    Router["masterRouter.js (Triagem + Redirecionamento Frotas)"]
+    Workers["Workers: geral | nutricao | immo | dev"]
+    IA["reasoningService.js (temp: 0.0: Gemini -> Groq -> OpenRouter)"]
+    Services["newsService (ERC) | emailService | combustiveis | farmacias | Radar 5 Frentes"]
+    DB["SQLite WAL ./data/pessoal_master.db (16 Tabelas)"]
+    GDrive["Google Drive Write-Through (Boot Restore + 5s Debounce + 15m + SIGTERM)"]
   end
 
-  Render --> Orchestrator
-  WA -->|"Polling HTTPS 3s (/api/sync/*)"| API
-  Workers --> Services["Serviços: Email IMAP, DGEG, ORS HGV, ImmoRadar, News, IPTV"]
-  Workers --> Storage["Persistência: SQLite WAL, JSON, Supabase, Google Drive"]
-  Bots --> Vercel["9 Mini Apps Vercel"]
-  ZP --> Storage
+  subgraph CloudDevOps["Cloud DevOps & Build"]
+    GHActions["GitHub API & Actions (workflow_dispatch APKs)"]
+    VercelDeploy["Vercel Continuous Deploy / Hooks"]
+  end
+
+  subgraph WorkCore["Domínio Exclusivo Trabalho & Frotas (Serviço Render Separado)"]
+    ZPAI["intentClassifier.js & dispatcher.js"]
+    ZPRoute["routeService.js (/rota ORS driving-hgv + /tacografo CE 561/2006)"]
+    ZPSupabase["AppFrota / Supabase"]
+  end
+
+  Master --> PersonalCore
+  DB <-->|"Write-Through"| GDrive
+  Workers --> CloudDevOps
+  ZP --> WorkCore
+  PersonalCore -->|"Redireciona /frota, /rota, /tacografo"| ZP
 ```
 
----
-
-## 2. Arquitetura de Execução Única e Sem Conflitos
-
-Para evitar erros **`409 Conflict: terminated by setWebhook request`** na API do Telegram e duplicação de estado entre o PC local e a nuvem:
-
-1. **Instância Autoritativa Única na Nuvem (`Render`)**:
-   - Quando `RENDER_EXTERNAL_URL` ou `WEBHOOK_BASE_URL` está definido (e `USE_POLLING` não está ativo), o [`index.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/index.js) regista webhooks individuais por bot (`/webhook/master`, `/webhook/dev`, `/webhook/frotas`, `/webhook/immo`, `/webhook/pessoal`, `/webhook/nutricao`).
-   - Apenas em execução explicitamente configurada para polling local (`launchSingleBot`) é invocado `deleteWebhook`.
-2. **Ligação Segura ao PC Local (`pcRemoteBridge` + `pc-worker.js`)**:
-   - Em vez de executar uma segunda instância dos bots do Telegram no PC, o PC Surface corre apenas o agente leve [`scripts/pc-worker.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/whatsapp-dev-assistant/scripts/pc-worker.js) (`npm run worker`), que consulta o Render via HTTPS (`/api/sync/*`) a cada **3 segundos** (`POLL_INTERVAL_MS = 3000`) autenticado por `x-sync-token` (`SYNC_SECRET_TOKEN`).
-   - No lado da nuvem, [`src/services/pcRemoteBridge.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/pcRemoteBridge.js) gere o *heartbeat* (janela online de 60 segundos) e a fila de ordens remotas com timeout de 25 segundos (`executeOnPc`).
-3. **Rotinas Automáticas e Keep-Alive no Orquestrador**:
-   - **Arranque:** Restauro de estado a partir do Google Drive antes de servir pedidos.
-   - **Auto-Sync Google Drive:** Backup automático a cada **15 minutos**.
-   - **Keep-Alive Render:** Ping periódico de **10 em 10 minutos** ao URL externo do serviço.
-   - **Radar Imobiliário (`iniciarAgendadorRadar`):** Varredura automática em Amarante a cada **4 horas** (entre as 08h e as 22h) e relatório diário às **08:30**.
-   - **Briefing Noticioso Europa/PT:** Disparo diário automático às **08:00**.
-   - **Lembretes Proativos:** Ciclo de verificação a cada **15 segundos**.
-4. **Execução Local Opcional com PM2 (`ecosystem.config.cjs`)**:
-   - Configurado para instância única (`instances: 1`, `exec_mode: 'fork'`, `max_memory_restart: '350M'`, logs em `./logs/bot-out.log` e `./logs/bot-error.log`).
+### Regra de Isolamento de Domínios ([`AGENTS.md`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/AGENTS.md))
+1. **`telegram-master-bot` (`@AndrePinheirobot`):** Exclusivo para vida pessoal, família (André, esposa, bebé Carolina), nutrição & receitas saudáveis, notícias oficiais certificadas, casa/Amarante, farmácias, Radar 5 Frentes, email IMAP e DevOps Cloud (`/status_cloud`, `/compilar`, Vercel/GitHub). **Sem qualquer acesso a Supabase, `AppFrota` ou dados da `ZeroPaperFrota`, nem dependência de PC local.**
+2. **Redirecionamento Automático de Frota ([`masterRouter.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/router/masterRouter.js)):** Pedidos com `/frota`, `/frotas`, `/veiculos`, `/viaturas`, `/rota`, `/tacografo`, `/appfrota` ou menções a autocarros/viaturas/CE 561/2006 devolvem de imediato `FLEET_REDIRECT_MSG` apontando para **`@zeropaperfrotaBot`**.
+3. **`zeropaper-frota-bot` (`@zeropaperfrotaBot`):** Serviço Web independente no Render ([`render.yaml`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/render.yaml)), autenticado por `TELEGRAM_FROTAS_TOKEN` e servido em **`POST /webhook/frota`**, concentrando 100% da gestão de frota (Supabase AppFrota, KM, anomalias, higienizações, checklists, stock, `/rota` via ORS `driving-hgv` e `/tacografo` segundo o Regulamento CE n.º 561/2006).
 
 ---
 
-## 3. Catálogo de Bots e Serviços do Ecossistema
+## 2. Arquitetura Cloud-Native & Persistência Write-Through
 
-### 3.1 Os 6 Bots Unificados no `telegram-master-bot`
+1. **Boot Restore Obrigatório Antes do SQLite e HTTP:**
+   - Em [`index.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/index.js), `initCloudPersistence()` é aguardado **antes** de `sqliteMasterDb.getDb()` e `server.listen(PORT)`, restaurando `pessoal_master.db` e `autorizados.json` a partir do Google Drive e removendo ficheiros `-wal`/`-shm` residuais.
+2. **Write-Through 5s + Sync Periódico 15m + Shutdown Gracioso:**
+   - Todas as escritas críticas no [`sqliteMasterDb.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/sqliteMasterDb.js) disparam `triggerCloudSyncDebounced(5000)` em [`googleDriveService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/googleDriveService.js).
+   - `startAutoDriveSync(15)` assegura backup periódico de 15 em 15 minutos com `wal_checkpoint(TRUNCATE)` prévio.
+   - Handlers `SIGTERM` e `SIGINT` em [`index.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/index.js) executam checkpoint SQLite e backup final para o Google Drive antes de encerrar o contentor Render.
+3. **Webhooks Únicos Sem Conflito:**
+   - Serviço Pessoal: `POST /webhook/master` (`TELEGRAM_BOT_TOKEN_MASTER`).
+   - Serviço Frotas: `POST /webhook/frota` (`TELEGRAM_FROTAS_TOKEN`, com verificação opcional `TELEGRAM_WEBHOOK_SECRET`).
+4. **Rotinas Autónomas (`Europe/Lisbon`):**
+   - **Keep-Alive Render:** Ping HTTP a `${RENDER_EXTERNAL_URL}/health` a cada **10 minutos**.
+   - **08:00 (`Europe/Lisbon`):** Briefing Matinal Integrado — Notícias Certificadas ([`getDailyNewsBriefing`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/newsService.js)) + Resumo de Emails IMAP ([`getEmailBriefing`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/emailService.js)).
+   - **08:30 (`Europe/Lisbon`):** Relatório diário consolidado do Radar 5 Frentes ([`gerarRelatorioMultiFrenteMarkdown`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/immoRadarService.js)).
+   - **Ciclos de 4 em 4h (`08:05`, `12:05`, `16:05`, `20:05` `Europe/Lisbon`):** Varredura Multi-Frente + filtros `/vigiar` (`dispararCicloRadarComAlertas`), com registo em `radar_execucoes` e alerta apenas para novidades, descidas de preço ou correspondências de filtros.
+   - **A cada 15 segundos:** Verificação e disparo de lembretes proativos pendentes (`getPendingDueReminders`).
 
-Todos os bots são instanciados simultaneamente em `botInstances` dentro de [`index.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/index.js):
+---
 
-| Bot | Handle Telegram | Endpoint Webhook | Worker / Destino Principal | Especialidade |
-| :--- | :--- | :--- | :--- | :--- |
-| **Master** | `@AndrePinheirobot` | `/webhook/master` | Orquestrador + `workerTag: 'master'` | Triagem universal, briefings globais e fallback de IA |
-| **Dev** | `@DesSofBot` | `/webhook/dev` | [`worker_dev.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/workers/worker_dev.js) | GitHub, Vercel Mini Apps, APKs Android, PC remoto e código |
-| **Frotas** | `@TrasFrotBot` | `/webhook/frotas` | [`worker_frotas.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/workers/worker_frotas.js) | AppFrota/ZeroPaper, rotas pesados (`driving-hgv`), tacógrafo CE 561/2006 |
-| **Immo** | `@ppspppBot` | `/webhook/immo` | [`worker_immo.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/workers/worker_immo.js) | Radar de moradias novas, portais imobiliários, avaliação pericial CMVM |
-| **Pessoal** | `@AndTrarBOT` | `/webhook/pessoal` | [`worker_geral.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/workers/worker_geral.js) | Emails IMAP, combustíveis DGEG, trânsito, notícias, IPTV, família e lembretes |
-| **Nutrição** | `@Nutriainbot` | `/webhook/nutricao` | [`worker_nutricao.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/workers/worker_nutricao.js) | Meta de 160g proteína/dia, 2.5L água, 5g creatina e análise de macros |
+## 3. Inteligência Artificial Determinística (`temperature: 0.0`) e Multimodal
 
-### 3.2 Serviços Companheiros
+1. **Regras Grok Bot ([`AGENTS.md`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/AGENTS.md) & [`reasoningService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/reasoningService.js)):**
+   - **Zero Alucinações & `temperature: 0.0`:** Todas as chamadas LLM (`askAgent` e `generateDeterministicCompletion`) e de visão (`multimodalVision.js`) usam `temperature: 0.0` (com `topP: 0.1` no Gemini).
+   - **Cascata Canónica:**
+     1. **Google Gemini:** `gemini-flash-latest` → `gemini-flash-lite-latest`
+     2. **Groq LPU:** `process.env.GROQ_MODEL || 'qwen/qwen3.8-27b'` → `qwen/qwen3.8-27b` → `openai/gpt-oss-120b`
+     3. **OpenRouter:** `openrouter/free` e modelos gratuitos de fallback
+   - **Segurança de Credenciais:** Todas as chaves residem exclusivamente em variáveis de ambiente (`process.env.*`), sem segredos em código-fonte.
+2. **Roteamento Cognitivo & Memória Conversacional:**
+   - [`src/router/masterRouter.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/router/masterRouter.js): `detectIntent` + `tryPersonalDispatch` (`temperature: 0.0`, JSON estruturado para compras, tarefas, diário Carolina, notas, lembretes, nutrição e DevOps Cloud) + `routeMessage`.
+   - [`src/shared/conversationMemory.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/conversationMemory.js): persiste na tabela SQLite `conversation_history` com `MAX_TURNS = 12` e `SESSION_TTL_MS = 3h`.
+3. **Multimodal (Visão & Voz) & Self-Refine:**
+   - [`multimodalVision.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/multimodalVision.js) + [`cloudinaryCdn.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/cloudinaryCdn.js) + [`whisperAudio.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/whisperAudio.js).
+   - [`selfRefineEngine.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/selfRefineEngine.js): persiste falhas na tabela SQLite `error_reports` e abre Pull Requests corretivos via GitHub Octokit.
 
-| Projeto | Entrada / Porta | Função no Ecossistema |
+---
+
+## 4. Base de Dados Única SQLite WAL (`./data/pessoal_master.db`) — 16 Tabelas
+
+Gerida por [`src/shared/sqliteMasterDb.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/sqliteMasterDb.js) (`MASTER_DB_PATH` sobreponível para testes; `journal_mode = WAL`; Write-Through 5s para o Google Drive):
+
+| # | Tabela | Finalidade |
+|---|---|---|
+| 1 | `shopping` | Lista de compras partilhada (Telegram + Mini App) |
+| 2 | `tasks` | Tarefas domésticas/familiares |
+| 3 | `baby_logs` | Diário da bebé Carolina (faltas, saúde, escola, atividades) |
+| 4 | `notes` | Notas rápidas com cor |
+| 5 | `reminders` | Lembretes proativos em `Europe/Lisbon` |
+| 6 | `nutrition_logs` | Proteína, calorias, hidratação e creatina diária |
+| 7 | `saved_recipes` | Histórico de receitas saudáveis (Geral, Airfryer, MCC 4 blocos) |
+| 8 | `radar_casas` | Frente 1: Moradias/imóveis Amarante + avaliação CMVM + historial de preço |
+| 9 | `radar_carros` | Frente 2: Automóveis EV/PHEV/Combustão + baixas de preço |
+| 10 | `radar_tech` | Frente 3: Tecnologia PT/ES + baixas de preço |
+| 11 | `radar_amazon` | Frente 4: Amazon.es & Segunda Mano/Warehouse |
+| 12 | `radar_apple` | Frente 5: Apple Novo 3A vs Recondicionado Grau A |
+| 13 | `radar_filtros` | Filtros personalizados de vigilância (`/vigiar`, `/vigiar_amazon`, `/vigiar_apple`, `/meus_alertas`) |
+| 14 | `radar_execucoes` | Registo de execuções e métricas dos ciclos multi-frente do Radar |
+| 15 | `error_reports` | Registo estruturado de erros e autocorreções Self-Refine |
+| 16 | `conversation_history` | Memória conversacional multi-turno (TTL 3h, máx. 12 turnos) |
+
+---
+
+## 5. Catálogo de Funcionalidades Cloud-Native (`@AndrePinheirobot`)
+
+### 5.1 Notícias Certificadas ([`newsService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/newsService.js))
+Whitelist estrita (`TRUSTED_SOURCES` verificada via `isTrustedSource(url)`):
+`portugal.gov.pt`, `diariodarepublica.pt`, `ipma.pt`, `prociv.gov.pt`, `infraestruturasdeportugal.pt`, `ec.europa.eu`, `lusa.pt`, `rtp.pt`, `jn.pt`, `cm-amarante.pt`, `cimtamegaesousa.pt`, `averdade.com`, `tamegasousa.pt`, `expressodeamarante.pt`.
+- `/noticias` — Briefing nacional, economia, Amarante, Governo e alertas IPMA/ANEPC.
+- `/noticias_regiao` · `/amarante` — Atualidade do Tâmega e Sousa / Amarante.
+- `/governo` · `/leis` — Comunicados `portugal.gov.pt`, Diário da República, IPMA/ANEPC/IP e Comissão Europeia.
+
+### 5.2 Nutrição 160g & Receitas Saudáveis ([`worker_nutricao.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/workers/worker_nutricao.js))
+- Meta diária: **160g proteína**, **2500ml água**, **5g creatina**.
+- `/plano` · `/hoje` · `/proteina <g> : <refeição>` · `/agua <ml>` · `/creatina`.
+- `/receita [pedido]` · `/receita_airfryer [pedido]` · `/receita_mcc [pedido]` (Monsieur Cuisine Connect com regra anti-refogado): devolvem obrigatoriamente **4 blocos** (1. Tempo & Doses; 2. Ingredientes em gramas/ml; 3. Preparação passo a passo; 4. Tabela nutricional por dose incluindo `% da meta diária de 160g`) e gravam automaticamente em `saved_recipes`.
+
+### 5.3 Radar de Oportunidades em 5 Frentes & Vigilância ([`worker_immo.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/workers/worker_immo.js))
+- **Frente 1 — Casas & CMVM ([`immoRadarService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/immoRadarService.js), [`immoCmvmService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/immoCmvmService.js)):** `/casas [zona]`, `/moradias_novas`, `/avaliacao <área> <zona> <tipologia> <estado> [terreno_m2] [CE]`, `/sites`.
+- **Frente 2 — Carros ([`autoRadarService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/autoRadarService.js)):** `/carros [pesquisa]`.
+- **Frente 3 — Tech PT/ES ([`techRadarService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/techRadarService.js)):** `/tech [produto]`.
+- **Frente 4 — Amazon.es ([`amazonRadarService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/amazonRadarService.js)):** `/amazon [produto]`, `/ofertas`, `/vigiar_amazon <termo> [preço]`.
+- **Frente 5 — Apple Novo vs Grau A ([`appleRadarService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/appleRadarService.js)):** `/apple [modelo]`, `/iphone_preco`, `/apple_refurb`, `/vigiar_apple <termo> [preço]`.
+- **Vigilância Ativa & Relatórios:** `/vigiar <categoria> <termo|link> [preco_alvo]`, `/meus_alertas` (`apagar <id>`), `/radar`, `/relatorio`, `/alertas`.
+
+### 5.4 Email IMAP, DGEG, Farmácias, Família, Lembretes, IPTV & Cloud DevOps
+- **Email (`ImapFlow` + `mailparser`):** `/emails`, `/ler_email <N|assunto>`, `/email_status`, `/briefing`.
+- **Utilidade Pública:** `/combustiveis [concelho]`, `/gasoleo`, `/gasolina` (API DGEG), `/farmacias [concelho]`, `/transito`, `/pesquisa <termo>`.
+- **Família & Lembretes DST-safe:** `/compras`, `/tarefas`, `/carolina`, `/notas`, `/lembrete`.
+- **IPTV & Streaming:** `/tv [canal]`, `/canal`, `/portugal.m3u`.
+- **DevOps 100% Cloud ([`worker_dev.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/workers/worker_dev.js)):** `/status_cloud`, `/compilar <repo> [workflow] [branch]` (GitHub Actions `workflow_dispatch`), `/projetos`, `/criar_app` (+ webhook Vercel), `/apps`, `/apks`.
+- **Administração & Drive:** `/autorizados`, `/autorizar`, `/bloquear`, `/drive`, `/diagnostico`, `/status`.
+
+---
+
+## 6. Mini Apps Web (`appsCatalog.js`) e Endpoints HTTP (`index.js`)
+
+### 6.1 Segregação das 9 Mini Apps Vercel ([`src/shared/appsCatalog.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/appsCatalog.js))
+
+| Domínio | Aplicação | URL Oficial |
 | :--- | :--- | :--- |
-| **ZeroPaperFrota Bot** ([`server.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot/server.js)) | Express `:3001` (`@zeropaperfrotaBot`) | Bot operacional dedicado à frota com persistência direta no Supabase, confirmação em 2 passos (`confirmation.js`), idempotência (`idempotency.js`) e gestão de ações pendentes (`pendingActions.js`). |
-| **WhatsApp Dev Assistant** ([`src/index.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/whatsapp-dev-assistant/src/index.js)) | Painel Web `:3333` + Baileys | Cliente WhatsApp no PC com integração Antigravity CLI, compilação Android/Gradle (`.apk`), controlo de sistema e worker ponte [`scripts/pc-worker.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/whatsapp-dev-assistant/scripts/pc-worker.js) ligado ao Render. |
+| `pessoal` | **Família (Gestão & Carolina)** | `https://gestao-familiar-webapp.vercel.app` |
+| `pessoal` | **ImmoEval (Avaliação Imobiliária)** | `https://pesquisa-imobiliario.vercel.app` |
+| `pessoal` | **Pladur-Pro (Engenharia 3D)** | `https://pladur-pro.vercel.app` |
+| `pessoal` | **Casa de Bonecas 3D** | `https://casadebonecas-3d.vercel.app` |
+| `pessoal` | **MatchPro (Tática & Jogos)** | `https://matchpro-alpha.vercel.app` |
+| `pessoal` | **Last War Tactics** | `https://last-war-tactics.vercel.app` |
+| `pessoal` | **Scaffold Bot Preview** | `https://teste-scaffold-bot.vercel.app` |
+| `trabalho` | **AppFrota** *(encaminhado para `@zeropaperfrotaBot`)* | `https://appfrota-ten.vercel.app` |
+| `trabalho` | **RotaBus** *(encaminhado para `@zeropaperfrotaBot`)* | `https://smooth-bus-routes.vercel.app` |
+
+### 6.2 Endpoints HTTP Pessoais (`PORT=3000`, zero `/api/sync/*`)
+- **Webhook Único:** `POST /webhook/master`
+- **Estado & Catálogo:** `GET /`, `GET /health`, `GET /webapp`, `GET /api/apps`, `GET /portugal.m3u`
+- **API Familiar SQLite WAL ([`familyRoutes.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/familyRoutes.js)):** `/api/family/shopping`, `/api/family/tasks`, `/api/family/baby`, `/api/family/notes`
 
 ---
 
-## 4. Pipeline de Roteamento, Classificação e Formatação
+## 7. Serviço Isolado de Trabalho (`zeropaper-frota-bot`)
 
-### 4.1 Ordem de Decisão em `rotear(ctx, text)`
-1. Comandos globais rápidos (`/reset`, padrões de estado/resumo/macros, notícias Europa/Portugal).
-2. **`tryAutoDispatch`** ([`zeroPaperDispatcher.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/zeroPaperDispatcher.js)): analisa linguagem natural em `temperature: 0.0` (`response_mime_type: 'application/json'`) via Gemini (`gemini-flash-lite-latest`, `gemini-flash-latest`) com fallback Groq para os domínios:
-   - `APPFROTA`: `KM`, `ANOMALIA`, `HIGIENIZACAO`, `CHECKLIST`, `SERVICO`, `STOCK`, `CONSULTA`
-   - `PESSOAL`: `COMPRAS`, `TAREFA`
-   - `LEMBRETE`
-   - `PC_REMOTE`: `PC`
-   - `GERAL`: `CONVERSA`
-3. Comandos explícitos de barra (`/emails`, `/combustiveis`, `/moradias_novas`, `/avaliacao`, `/rota`, `/tacografo`, `/proteina`, etc.).
-4. **`detectIntent`** ([`src/router/intentRouter.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/router/intentRouter.js)): ordem determinística de prioridade `FROTAS` → `IMMO` → `DEV` → `TV` → `GERAL` → `NUTRICAO`, com fallback padrão `'GERAL'`.
-5. Fallback final para `askAgent` com perfil `workerTag: 'master'`.
-
-### 4.2 Resiliência de Entrega e Sanitização Markdown
-- [`src/utils/markdownSanitizer.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/utils/markdownSanitizer.js): `sanitizeTelegramMarkdown` protege blocos de código, código inline e links Markdown com tokens temporários `§§...§§`, escapa underscores internos de identificadores `snake_case` e balanceia `*` e `_` desemparelhados.
-- `sendReply` em [`index.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/index.js): divide mensagens acima de `maxLen = 4000` caracteres e, se o Telegram rejeitar o *parse* Markdown, reenvia automaticamente em texto simples.
-- [`src/utils/resilience.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/utils/resilience.js): disponibiliza `withTimeout`, `safeExecute` e `withTypingHeartbeat`.
+Localizado em [`c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot) (`@zeropaperfrotaBot`, declarado como serviço autónomo no [`render.yaml`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/render.yaml)):
+- Endpoint dedicado **`POST /webhook/frota`** autenticado por **`TELEGRAM_FROTAS_TOKEN`** (com fallback `TELEGRAM_BOT_TOKEN` local) e `TELEGRAM_WEBHOOK_SECRET` opcional.
+- Persistência operacional isolada no **Supabase** (`AppFrota`), confirmação em 2 passos, idempotência SHA-256 e matriz RBAC por perfil.
+- [`src/services/routeService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot/src/services/routeService.js): implementa `/rota` (OpenRouteService `driving-hgv`, sem distâncias inventadas se `ORS_API_KEY` falhar) e `/tacografo` (Regulamento CE n.º 561/2006).
 
 ---
 
-## 5. Inteligência Artificial Determinística (`temperature: 0.0`) e Multimodal
+## 8. Segurança, Blueprints Render e Testes
 
-1. **Motor de Raciocínio (`src/services/reasoningService.js`)**:
-   - Todas as chamadas operam com **`temperature: 0.0`** e política rigorosa **anti-alucinação**, instruindo os modelos a nunca inventar preços, stocks, distâncias, emails ou factos sem base real ou ferramenta verificada.
-   - Prompts especializados e enquadramento regulatório por persona:
-     - `master` / `pessoal` / `dev`: referência a conformidade **EU AI Act (UE 2024/1689)** e **RGPD (UE 2016/679)**.
-     - `frotas`: **Regulamento (CE) n.º 561/2006** (tempos de condução e repouso).
-     - `immo`: **Regulamento CMVM n.º 2/2015** (peritagem e avaliação imobiliária).
-     - `nutricao`: referenciais **EFSA / ISSN**.
-   - Cascata de modelos configurada: **Google Gemini** → **Groq LPU** (`GROQ_MODEL` ou fallback `'qwen/qwen3.8-27b'`) → **OpenRouter**.
-2. **Memória Conversacional (`src/shared/conversationMemory.js`)**:
-   - Guarda até **`MAX_TURNS = 12`** turnos por sessão com validade **`SESSION_TTL_MS = 3h`**, persistindo em `./data/conversas_historico.json` com sincronização para o Google Drive.
-3. **Visão e Voz**:
-   - **Imagens / Documentos (`src/shared/multimodalVision.js`)**: análise visual com Gemini (`gemini-flash-lite-latest`, `gemini-flash-latest`, `temperature: 0.0`, timeout `10s`) e alojamento via [`src/shared/cloudinaryCdn.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/cloudinaryCdn.js).
-   - **Mensagens de Voz (`src/shared/whisperAudio.js`)**: transcrição automática via **Groq Whisper LPU** para texto encaminhado ao mesmo pipeline de roteamento e ZeroPaper.
-
----
-
-## 6. Referência de Comandos e Funcionalidades por Domínio
-
-### 6.1 Assistente Pessoal, Email, Combustíveis & Família (`worker_geral.js`)
-- **Email Gmail IMAP ([`emailService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/emailService.js)):**
-  - `/emails` — Lista os emails recentes reais via `ImapFlow` (`imap.gmail.com:993`, `EMAIL_SECURE !== 'false'`).
-  - `/ler_email <N|assunto>` — Lê o corpo completo (via `mailparser`) e gera resumo executivo com IA determinística.
-  - `/email_status` — Testa a ligação IMAP ativa (apresentando endereço mascarado, ex.: `an***o@gmail.com`).
-  - `/briefing` — Gera o briefing executivo consolidado do dia (emails, notícias, agenda/lembretes, estado geral).
-- **Combustíveis Oficiais DGEG ([`combustiveisService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/combustiveisService.js)):**
-  - `/combustiveis [concelho]` · `/gasoleo [concelho]` · `/gasolina [concelho]` — Consulta a API pública oficial da DGEG (`precoscombustiveis.dgeg.gov.pt`, Distrito do Porto `idDistrito=13`) para **Gasóleo Simples (`2101`)** e **Gasolina 95 Simples (`3201`)**.
-  - Concelhos mapeados: `amarante`/`lixa` (`181`), `baiao` (`183`), `felgueiras` (`185`), `marco` (`187`), `paredes` (`189`), `penafiel` (`191`), `porto` (`192`), `vilareal` (`254`).
-- **Utilidades, Notícias, Trânsito & TV:**
-  - `/transito` — Informação de trânsito (ex.: eixo A4 / Túnel do Marão).
-  - `/pesquisa <termo>` · `/farmacias` — Pesquisa web ao vivo via DuckDuckGo HTML ([`webSearch.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/webSearch.js)).
-  - `/tv [canal]` — Pesquisa na lista de **776 canais PT** e playlists IPTV ([`tvService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/tvService.js)).
-  - `/ergonomia` · `/nutricao` — Orientações rápidas de postura e nutrição.
-- **Gestão Familiar & Lembretes ([`familyDb.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/familyDb.js)):**
-  - `/compras` · `/tarefas` · `/carolina` · `/notas` · `/lembrete` — CRUD em conversa sincronizado com o gestor web familiar e lembretes proativos.
-
-### 6.2 Imobiliário & Avaliação Pericial CMVM (`worker_immo.js`)
-- `/moradias_novas` — Pesquisa ao vivo nas plataformas imobiliárias (Idealista, Imovirtual, RE/MAX, ERA via DuckDuckGo HTML em [`immoRadarService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/immoRadarService.js)) combinada com a base SQLite local e catálogo de portais.
-- `/radar` — Executa varredura ativa em Amarante (`executarVarreduraAmarante`) e atualiza [`./data/imoveis_amarante.db`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/data/imoveis_amarante.db).
-- `/relatorio` · `/relatorio_imoveis` — Relatório consolidado dos imóveis captados pelo radar.
-- `/sites` · `/sites_immo` — Lista os **12 portais e agências locais** catalogados em [`immoSitesCatalog.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/immoSitesCatalog.js).
-- `/alertas` · `/alertas_immo` — Estado dos alertas automáticos (ciclo de 4h e resumo às 08:30).
-- `/avaliacao <área> <zona> <tipologia> <estado> [terreno_m2] [CE]` · `/immo` — Avaliação pericial CMVM ([`immoCmvmService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/immoCmvmService.js)):
-  - **Zonas Base Amarante:** Amarante Centro (`1.350 €/m²`), Coroa Periférica (`1.180 €/m²`), Zona Limítrofe (`1.120 €/m²`).
-  - **Terreno por Escalões:** `35 €/m²` (≤500 m²), `8 €/m²` (501–2000 m²), `2 €/m²` (>2000 m²).
-  - Ajustes por classe energética (CAPEX/bónus), estado de conservação e penalização de `-25%` por ausência de licença de utilização.
-
-### 6.3 Frotas, Rotas HGV & Tacógrafo (`worker_frotas.js`)
-- `/frota` (`/frotas`, `/veiculos`, `/viaturas`) — Relatório em tempo real das viaturas a partir do Supabase ([`appFrotaService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/appFrotaService.js), cache de 5 min em memória).
-- `/rota <ORIGEM> para <DESTINO>` — Cálculo rodoviário de pesados com perfil **`driving-hgv`** via OpenRouteService (`ORS_API_KEY`) e ligação à app RotaBus.
-- `/tacografo [horas]` — Verificação legal segundo o **Regulamento (CE) n.º 561/2006** (pausas obrigatórias após 4h30 de condução contínua / fracionamento 15+30 min).
-- **Ingestão por Voz ou Texto Natural (`tryAutoDispatch`):** ex.: *"Turno 39-HZ-66 com 155.300 km"*, *"Luz do óleo acesa na carrinha 55-TN-89"*, *"Carrinha 01-AA-01 lavada e desinfetada"*, *"Checklist da 39-HZ-66 ok"*.
-
-### 6.4 Engenharia DevOps & PC Remoto (`worker_dev.js`)
-- `/projetos` (`/github`, `/repos`) — Lista repositórios via Octokit (`GITHUB_TOKEN`, `GITHUB_OWNER`).
-- `/criar_app <especificação>` — Apoio à criação/arranque de novas aplicações via integração GitHub.
-- `/apps` (`/links`, `/catalogo`, `/catalogo_apps`, `/vercel`) — Apresenta o catálogo completo das 9 Mini Apps Vercel.
-- `/apks` (`/download_apk`, `/android`) — Fornece links de download Android (ex.: `rotabus.apk`).
-- `/pc` (ou frases como *"estado do pc"* / *"memória do pc"*) e `/print` — Executa diagnóstico/comandos no PC Surface em tempo real via [`pcRemoteBridge.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/pcRemoteBridge.js).
-- `/compilar <projeto>` — Dispara compilação remota via bridge para o `whatsapp-dev-assistant` (`androidService` / `universalProjectService`).
-- Linguagem natural de engenharia / código (`handleCode` / `/agy`) via `askAgent` (`workerTag: 'dev'`).
-
-### 6.5 Nutrição & Performance (`worker_nutricao.js`)
-- Meta diária configurada: **160g proteína**, **2.5L água (2500ml)** e **5g creatina monoidratada**.
-- `/plano` (`/dieta`, `/menu_dieta`) — Plano diário estruturado de refeições ricas em proteína.
-- `/hoje` (`/macros`, `/resumo`, `/status`) — Progresso diário com barras visuais (proteína, água e estado da creatina).
-- `/proteina <gramas> : <refeição>` (ou padrão rápido como `45g de frango`) — Regista ingestão proteica até 200g por entrada.
-- `/agua <ml>` — Regista consumo de água (padrão `250ml`).
-- `/creatina` — Regista toma diária de 5g.
-- Diálogo livre com contexto em tempo real sobre os macros já consumidos no dia.
-
----
-
-## 7. Mini Apps Vercel (`appsCatalog.js`) e API HTTP (`index.js` + `familyRoutes.js`)
-
-### 7.1 Catálogo das 9 Mini Apps Web (`VERCEL_APPS`)
-
-| Aplicação | Finalidade | URL Oficial |
-| :--- | :--- | :--- |
-| **Gestão Familiar & Carolina** | Compras, tarefas, registos da bebé e notas | `https://gestao-familiar-webapp.vercel.app` |
-| **RotaBus (Pesados & Conforto VIP)** | Apoio rodoviário a pesados (+ `rotabus.apk`) | `https://smooth-bus-routes.vercel.app` |
-| **MatchPro** | Tática, futebol e jogos | `https://matchpro-alpha.vercel.app` |
-| **Pladur-Pro** | Engenharia e cálculo 3D de tetos/divisórias | `https://pladur-pro.vercel.app` |
-| **AppFrota** | Painel web ZeroPaperFrota (viaturas, KM, anomalias) | `https://appfrota-ten.vercel.app` |
-| **Casa de Bonecas 3D** | Aplicação interativa 3D | `https://casadebonecas-3d.vercel.app` |
-| **ImmoEval** | Avaliação imobiliária web | `https://pesquisa-imobiliario.vercel.app` |
-| **Last War Tactics** | Guia tático e calculadora | `https://last-war-tactics.vercel.app` |
-| **Scaffold Bot Preview** | Protótipo de bot / scaffold | `https://teste-scaffold-bot.vercel.app` |
-
-### 7.2 Endpoints HTTP do Orquestrador (`PORT=3000`)
-- **Monitorização e Páginas:** `GET /`, `GET /health`, `GET /webapp`, `GET /api/apps`, `GET /portugal.m3u`.
-- **Webhooks Telegram:** `POST /webhook/{master,dev,frotas,immo,pessoal,nutricao}`.
-- **Ponte PC Remoto:** `/api/sync/*` (consumido por `scripts/pc-worker.js` com cabeçalho `x-sync-token`).
-- **API Familiar ([`familyRoutes.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/familyRoutes.js)) com CORS:**
-  - Compras: `GET /api/family/shopping`, `POST /api/family/shopping`, `PATCH|POST /api/family/shopping/:id/toggle`, `DELETE /api/family/shopping/:id`
-  - Tarefas: `GET /api/family/tasks`, `POST /api/family/tasks`, `PATCH|POST /api/family/tasks/:id/toggle`, `DELETE /api/family/tasks/:id`
-  - Bebé (Carolina): `GET /api/family/baby`, `POST /api/family/baby`, `DELETE /api/family/baby/:id`
-  - Notas: `GET /api/family/notes`, `POST /api/family/notes`, `DELETE /api/family/notes/:id`
-
----
-
-## 8. Persistência Híbrida e Backups na Nuvem
-
-1. **SQLite Local (Modo WAL — `better-sqlite3`):**
-   - `./data/imoveis_amarante.db` (`immoRadarService.js`): tabelas `imoveis` e `radar_execucoes`.
-   - `./family.db` (`sqliteFamilyDb.js`): tabelas `shopping`, `tasks`, `baby_logs`, `notes` com disparo para `cloudSync.js`.
-2. **Armazenamento JSON Local:**
-   - `./data/autorizados.json` (lista persistida de acessos autorizados)
-   - `./data/conversas_historico.json` (memória conversacional de 12 turnos / 3h)
-   - `./data/family_store.json`, `./data_central.json`, `./data_pessoal.json`, `./data_cloud_sync.json`, `./data_error_reports.json` (`selfRefineEngine.js`)
-3. **Supabase Cloud:**
-   - Tabelas familiares definidas em [`supabase_schema.sql`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/supabase_schema.sql): `family_shopping`, `family_tasks`, `family_baby_logs`, `family_notes` com Row Level Security (RLS) ativo.
-   - Tabelas operacionais de frota (`viaturas`, registos de KM, anomalias, higienizações e checklists) acedidas por `appFrotaService.js` e `zeropaper-frota-bot`.
-4. **Google Drive Backup & Restore (`googleDriveService.js`):**
-   - Autenticação OAuth2 via **JWT Bearer RS256** (`GOOGLE_SERVICE_ACCOUNT_KEY` ou `./service-account.json`) para a pasta configurada em `GOOGLE_DRIVE_FOLDER_ID`.
-   - Restauro automático no arranque do Render e cópia incremental periódica a cada 15 minutos.
-
----
-
-## 9. Segurança, Privacidade e Controlo de Acesso
-
-- **Dual Whitelist e IDs Autorizados ([`src/shared/security.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/security.js)):**
-  - Apenas os dois contactos autorizados da família (`919115655` e `933276221` / formato `+351`) e o `CHAT_ID_AUTORIZADO` (padrão configurado no `.env.example`: `950415577`) possuem acesso administrativo/operacional, com estado sincronizado entre `./data/autorizados.json` e Google Drive.
-- **Autenticação Criptográfica de Mini Apps ([`src/shared/telegramAuth.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/telegramAuth.js)):**
-  - `validateTelegramWebAppData` verifica assinaturas **HMAC-SHA256** do parâmetro `initData` enviado no cabeçalho `x-telegram-init-data` das chamadas WebApp.
-- **Proteção de Credenciais e Git Hygiene ([`.gitignore`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/.gitignore)):**
-  - `.env`, `service-account.json`, `credentials.json`, `google-credentials.json`, bases SQLite (`*.db`, `*.sqlite`, `*.db-wal`, `*.db-shm`) e logs estão excluídos do controlo de versões Git.
-  - Nenhum segredo em texto claro é documentado ou versionado; todas as credenciais residem exclusivamente em variáveis de ambiente no Render e no `.env` local.
-
----
-
-## 10. Variáveis de Ambiente e Deployment (`render.yaml` & `Dockerfile`)
-
-O deployment principal no Render está definido no Blueprint [`render.yaml`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/render.yaml):
-- **Tipo:** Web Service (`runtime: node`, `plan: free`, `autoDeploy: true`)
-- **Build:** `npm install` · **Start:** `node index.js` · **Health Check:** `/health`
-- **Container Alternativo ([`Dockerfile`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/Dockerfile)):** `FROM node:20-alpine` com `python3 make g++` para compilação nativa do `better-sqlite3`, porta `3000`.
-
-### Chaves de Ambiente Configuradas (nomes em `.env.example` e `render.yaml`)
-
-| Categoria | Variáveis |
-| :--- | :--- |
-| **Bots Telegram** | `TELEGRAM_BOT_TOKEN_MASTER`, `TELEGRAM_DEV_TOKEN`, `TELEGRAM_FROTAS_TOKEN`, `TELEGRAM_IMMO_TOKEN`, `TELEGRAM_PESSOAL_TOKEN`, `TELEGRAM_NUTRICAO_TOKEN`, `CHAT_ID_AUTORIZADO`, `RENDER_EXTERNAL_URL` / `WEBHOOK_BASE_URL`, `USE_POLLING` |
-| **Provedores de IA** | `GEMINI_API_KEY`, `GROQ_API_KEY`, `GROQ_MODEL`, `OPENROUTER_API_KEY`, `HUGGINGFACE_TOKEN` |
-| **GitHub & Rotas** | `GITHUB_TOKEN`, `GITHUB_OWNER`, `ORS_API_KEY` |
-| **Email IMAP** | `EMAIL_USER`, `EMAIL_PASS` / `EMAIL_PASSWORD`, `EMAIL_SECURE` |
-| **Media & Backups** | `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `CLOUDINARY_URL`, `CLOUDINARY_UPLOAD_PRESET`, `GOOGLE_SERVICE_ACCOUNT_KEY` / `GOOGLE_SERVICE_ACCOUNT_PATH`, `GOOGLE_DRIVE_FOLDER_ID` |
-| **Bridge & Runtime** | `SYNC_SECRET_TOKEN` / `CLOUD_SERVER_URL` (no `pc-worker.js`), `NODE_ENV`, `LOG_LEVEL`, `PORT` |
-
----
-
-## 11. Suites de Teste e Verificação
-
-| Comando / Script | Ficheiro | Âmbito |
-| :--- | :--- | :--- |
-| `npm test` (em `telegram-master-bot`) | [`tests/run_master_battery.mjs`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/tests/run_master_battery.mjs) | Bateria de testes abrangente: segurança (dual whitelist), roteamento de intenções, sanitização Markdown, IMAP email, avaliação CMVM, radar imobiliário, DGEG combustíveis, persistência familiar e pesquisa web ao vivo. |
-| `npm run test:all` (em `telegram-master-bot`) | [`tests/test_all_bots_maximum_response.mjs`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/tests/test_all_bots_maximum_response.mjs) | Teste funcional integrado dos 6 bots (`@AndTrarBOT`, `@ppspppBot`, `@TrasFrotBot`, `@DesSofBot`, `@Nutriainbot`, `@AndrePinheirobot`). |
-| `node check_health.js` | [`check_health.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/check_health.js) | Verificação HTTP do `/health` local e das 9 aplicações Vercel. |
-| `node scripts/test-drive.js` · `scripts/test-tv.js` | `scripts/test-drive.js` · `scripts/test-tv.js` | Testes isolados ao backup Google Drive e catálogo IPTV. |
-| `npm test` (em `zeropaper-frota-bot`) | `node --test tests/**/*.test.js` | Testes unitários, segurança, integração e aceitação do bot ZeroPaperFrota. |
-
----
-
-## 12. Estrutura Real dos Repositórios
-
-```text
-projectos/
-├── telegram-master-bot/              # Orquestrador Principal 24/7 (Render)
-│   ├── index.js                      # Arranque HTTP + 6 Bots Telegram + Agendadores
-│   ├── render.yaml                   # Blueprint Render
-│   ├── Dockerfile                    # Imagem node:20-alpine
-│   ├── ecosystem.config.cjs          # Configuração PM2 local
-│   ├── supabase_schema.sql           # DDL das tabelas familiares no Supabase
-│   ├── check_health.js               # Health-check HTTP das 9 apps Vercel
-│   ├── public/                       # WebApp estática & portugal.m3u (776 canais)
-│   ├── scripts/                      # generate-pt-m3u.js, test-drive.js, test-tv.js
-│   ├── src/
-│   │   ├── router/                   # intentRouter.js
-│   │   ├── services/                 # appFrota, combustiveis, email, googleDrive,
-│   │   │                             # immoCmvm, immoRadar, news, pcRemoteBridge,
-│   │   │                             # reasoning, tv, zeroPaperDispatcher
-│   │   ├── shared/                   # appsCatalog, centralDb, cloudinaryCdn, cloudSync,
-│   │   │                             # conversationMemory, familyDb, familyRoutes,
-│   │   │                             # immoSitesCatalog, multimodalVision, security,
-│   │   │                             # selfRefineEngine, sqliteFamilyDb, telegramAuth,
-│   │   │                             # webSearch, whisperAudio
-│   │   ├── utils/                    # logger.js, markdownSanitizer.js, resilience.js
-│   │   └── workers/                  # worker_{dev,frotas,geral,immo,nutricao}.js
-│   └── tests/                        # run_master_battery.mjs, test_all_bots_maximum_response.mjs
-│
-├── zeropaper-frota-bot/              # Serviço Companheiro Dedicado de Frotas (:3001)
-│   ├── server.js
-│   ├── docs/                         # ARCHITECTURE.md, DATABASE.md, DEPLOYMENT.md, SECURITY.md
-│   ├── src/                          # ai/, bot/, database/repositories/, security/, services/, workflows/
-│   └── tests/                        # acceptance/, integration/, security/, unit/
-│
-└── whatsapp-dev-assistant/           # Assistente Local PC Surface (:3333) & Ponte Render
-    ├── scripts/pc-worker.js          # Worker HTTPS de polling (/api/sync/*) sem conflito Telegram
-    └── src/                          # whatsapp/, web/, services/ (antigravity, android, system...)
-```
+- **Controlo de Acesso ([`security.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/security.js)):** Dual Whitelist (`919115655`, `933276221`) + `CHAT_ID_AUTORIZADO` + `CHAT_ID_ESPOSA` opcional em `./data/autorizados.json`; validação WebApp HMAC-SHA256 ([`telegramAuth.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/telegramAuth.js)).
+- **Render Blueprint Unificado ([`render.yaml`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/render.yaml)):** Declara explicitamente os dois serviços web (`telegram-master-bot` pessoal SQLite+Drive vs. `zeropaper-frota-bot` trabalho Supabase+ORS).
+- **Suites de Teste Oficiais:**
+  - `npm test` em `telegram-master-bot`: [`tests/run_master_battery.mjs`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/tests/run_master_battery.mjs)
+  - `npm run test:live` em `telegram-master-bot`: [`tests/test_all_bots_maximum_response.mjs`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/tests/test_all_bots_maximum_response.mjs)
+  - `npm test` em `zeropaper-frota-bot`: `node --test tests/**/*.test.js`

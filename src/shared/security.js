@@ -149,13 +149,8 @@ export async function authMiddleware(ctx, next) {
       await ctx.reply(
         `✅ *Acesso Concedido com Sucesso!*\n━━━━━━━━━━━━━━━━━━━━━━━━\n` +
         `O teu número (*+${contact.phone_number}*) foi validado e registado no sistema de segurança.\n\n` +
-        `Tens agora acesso total e permanente aos 6 bots do ecossistema:\n` +
-        `• 🎛️ @AndrePinheirobot (Master)\n` +
-        `• 💻 @DesSofBot (Dev & Cloud)\n` +
-        `• 🚛 @TrasFrotBot (Frotas & Tacógrafo)\n` +
-        `• 🏠 @ppspppBot (Imobiliário CMVM)\n` +
-        `• 📋 @AndTrarBOT (Pessoal & Família)\n` +
-        `• 🥗 @Nutriainbot (Nutrição & Dieta)\n\n` +
+        `Tens agora acesso total e permanente ao **Grok Bot (@AndrePinheirobot)** (Pessoal, Família, Notícias Certificadas, Nutrição, Radar 5 Frentes & Dev).\n` +
+        `_(Nota: Gestão operacional de frotas corre em separado no bot @zeropaperfrotaBot)_\n\n` +
         `Usa \`/menu\` para acederes ao Cockpit!`,
         {
           parse_mode: "Markdown",

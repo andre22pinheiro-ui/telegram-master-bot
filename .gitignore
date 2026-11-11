@@ -1,12 +1,12 @@
 node_modules/
 .env
 logs/
-data/geral_data.json
-data/conversas_historico.json
-data/imoveis_amarante.db
-data/ficheiros/
+data/*.json
 data/*.db
 data/*.sqlite
+data/*.db-shm
+data/*.db-wal
+data/ficheiros/
 check_health.js
 *.log
 *.db-shm
@@ -16,3 +16,4 @@ family.db
 service-account.json
 credentials.json
 google-credentials.json
+data_error_reports.json

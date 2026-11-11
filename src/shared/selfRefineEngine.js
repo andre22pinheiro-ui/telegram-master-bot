@@ -2,54 +2,42 @@ import "dotenv/config";
 import fs from "fs";
 import path from "path";
 import { Octokit } from "@octokit/rest";
+import { sqliteMasterDb } from "./sqliteMasterDb.js";
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_OWNER = process.env.GITHUB_OWNER || "andre22pinheiro-ui";
-const GITHUB_REPO = process.env.GITHUB_REPO || "whatsapp-dev-assistant";
+const GITHUB_REPO = process.env.GITHUB_REPO || "telegram-master-bot";
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
 
 const octokit = GITHUB_TOKEN ? new Octokit({ auth: GITHUB_TOKEN }) : null;
 
-// Registo de erros em ficheiro local estruturado
-const ERROR_LOG_PATH = path.resolve("./data_error_reports.json");
-
-function loadErrorHistory() {
-  try {
-    if (fs.existsSync(ERROR_LOG_PATH)) {
-      return JSON.parse(fs.readFileSync(ERROR_LOG_PATH, "utf-8"));
-    }
-  } catch (e) {}
-  return [];
-}
-
-function saveErrorHistory(list) {
-  try {
-    fs.writeFileSync(ERROR_LOG_PATH, JSON.stringify(list, null, 2), "utf-8");
-  } catch (e) {
-    console.error("Erro ao guardar histórico de erros:", e.message);
-  }
-}
-
 /**
- * 1. TRAP DE ERROS & LOGS ESTRUTURADOS
+ * 1. TRAP DE ERROS & LOGS ESTRUTURADOS (SQLite WAL error_reports)
  */
 export function recordExecutionError({ serviceName, error, context = {} }) {
-  const reports = loadErrorHistory();
-  const report = {
-    id: `err_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-    timestamp: new Date().toISOString(),
-    service: serviceName,
-    message: error?.message || String(error),
-    stack: error?.stack || null,
-    context,
-    resolved: false
-  };
+  const message = error?.message || String(error);
+  const stack = error?.stack || null;
+  let report = null;
+  try {
+    report = sqliteMasterDb.addErrorReport({
+      service: serviceName || "system",
+      message,
+      stack,
+      context
+    });
+  } catch {
+    report = {
+      id: `err_${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      service: serviceName,
+      message,
+      stack,
+      context,
+      resolved: false
+    };
+  }
 
-  reports.push(report);
-  if (reports.length > 50) reports.shift(); // Manter os últimos 50 registos
-  saveErrorHistory(reports);
-
-  console.error(`🚨 [TRAP ERRO - ${serviceName.toUpperCase()}] ${report.message}`);
+  console.error(`🚨 [TRAP ERRO - ${String(serviceName || "SYSTEM").toUpperCase()}] ${message}`);
   return report;
 }
 
@@ -84,12 +72,16 @@ export async function diagnoseAndRefineError({ filePath, errorMessage, errorStac
 
   try {
     const geminiKey = process.env.GEMINI_API_KEY || GEMINI_KEY;
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${geminiKey}`;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent`;
     const res = await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-goog-api-key": geminiKey
+      },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }]
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.0, maxOutputTokens: 4096 }
       })
     });
 

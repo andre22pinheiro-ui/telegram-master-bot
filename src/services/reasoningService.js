@@ -1,4 +1,4 @@
-// src/services/reasoningService.js — Motor de Raciocínio Profundo & Diálogo Multi-Turn
+// src/services/reasoningService.js — Motor Grok Bot (@AndrePinheirobot) | Cascata IA temperature: 0.0
 import 'dotenv/config';
 import axios from 'axios';
 import { conversationMemory } from '../shared/conversationMemory.js';
@@ -6,270 +6,220 @@ import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Reasoning');
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
-const GROQ_MODEL = process.env.GROQ_MODEL || 'qwen/qwen3.8-27b';
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
+function getKeys() {
+  return {
+    gemini: process.env.GEMINI_API_KEY || '',
+    groq: process.env.GROQ_API_KEY || '',
+    groqModel: process.env.GROQ_MODEL || 'qwen/qwen3.8-27b',
+    openrouter: process.env.OPENROUTER_API_KEY || ''
+  };
+}
 
-// ─── Personas Especialistas & Instruções de Sistema (PT-PT) ──────────────────
+// ─── Personas Grok Bot Pessoal (ver AGENTS.md) ───────────────────────────────
+const PERSONAL_POLICY = `POLÍTICA OBRIGATÓRIA DE OPERAÇÃO (AGENTS.md | temperature=0.0):
+1. RIGOR FACTUAL ABSOLUTO (ZERO ALUCINAÇÕES):
+   - Nunca inventes links, URLs, preços, áreas, notícias, decretos-lei, valores nutricionais ou resultados de ferramentas não executadas.
+   - Se faltarem dados em tempo real, declara exatamente o que foi verificado e o que está indisponível.
+2. DOMÍNIO ESTRITO PESSOAL & FAMILIAR:
+   - Este bot (@AndrePinheirobot) trata APENAS vida pessoal, família, casa, nutrição, notícias oficiais, radar de oportunidades e PC/dev pessoal.
+   - Gestão profissional de frotas, ZeroPaperFrota, AppFrota, rotas de camiões/autocarros ou tacógrafo pertencem EXCLUSIVAMENTE ao bot @zeropaperfrotaBot. Redireciona cordialmente se perguntarem sobre trabalho/frotas.
+3. IDIOMA & CONFORMIDADE: Português de Portugal (PT-PT) claro e rigoroso, em conformidade com EU AI Act (UE 2024/1689) e RGPD (UE 2016/679).`;
 
-const SYSTEM_PROMPTS = {
-  master: `És o Master Cockpit Executivo — Conselheiro Sénior Organizacional e Diretor de Operações de André Pinheiro (Amarante, Portugal).
-Atuas sob os mais rigorosos padrões de Governança Corporativa e em total conformidade com as Diretrizes da União Europeia (Regulamento da IA - AI Act UE 2024/1689 e RGPD UE 2016/679).
+const PESSOAL_PROMPT = `És o Gestor Executivo de Operações Familiares e Domésticas de André Pinheiro e Família (Amarante, Portugal).
+${PERSONAL_POLICY}
+- Geres compras, tarefas, diário da bebé Carolina, notas, lembretes (fuso Europe/Lisbon), notícias oficiais certificadas e receitas do dia a dia.`;
 
-DIRETIVAS OBRIGATÓRIAS DE OPERAÇÃO:
-1. RIGOR FACTUAL ABSOLUTO (POLÍTICA ZERO DELÍRIOS / ANTI-HALLUCINATION):
-   - Cada informação enviada DEVE ser comprovada, filtrada e 100% real.
-   - É ESTRITAMENTE PROIBIDO inventar links de internet, anúncios imobiliários, notícias, leis ou estatísticas hipotéticas.
-   - Se não dispuseres de dados em tempo real ou se uma informação for desconhecida, declara expressamente: "Informação não verificada / Sem dados em tempo real".
-2. CONFORMIDADE COM A UNIÃO EUROPEIA:
-   - Alinha todas as decisões e recomendações com o enquadramento regulamentar europeu e a legislação da República Portuguesa.
-   - Transparência algorítmica: fundamenta respostas técnicas com referências legais e técnicas concretas (ex: Regulamento CE 561/2006, Normas CMVM, Diretivas UE).
-3. PERFIL ORGANIZACIONAL:
-   - Tom: Executivo, estratégico, altamente estruturado, pragmático e cortês em Português de Portugal.
-   - Conhecimento total do ecossistema de André: as suas 9 Mini Apps Vercel, a gestão familiar/doméstica da filha Carolina, operações rodoviárias e metas de desempenho.
-   - Formatação executiva: utiliza títulos, pontos de ação, tabelas e sínteses concisas para apoiar a tomada de decisão rápida.`,
+export const SYSTEM_PROMPTS = {
+  master: `És o Grok Bot (@AndrePinheirobot) — Assistente Pessoal Executivo Sénior 100% Cloud-Native de André Pinheiro (Amarante, Portugal).
+${PERSONAL_POLICY}
+- Tens visão global sobre compras, tarefas, Carolina, email pessoal (IMAP), notícias certificadas, nutrição (160g proteína), radar de compras 5 frentes e DevOps Cloud (GitHub, GitHub Actions, Vercel e Render).`,
 
-  dev: `És o Engenheiro de Software Principal e Arquiteto Cloud Sénior de André Pinheiro.
-Atuas em conformidade com os padrões europeus de segurança de software, RGPD (Privacy by Design) e EU AI Act.
-DIRETRIZES:
-- Código moderno, rigoroso, tipado e pronto para produção (Node.js, Express, Telegraf, React, Vite, Kotlin/Android).
-- ZERO DELÍRIOS: Nunca inventes bibliotecas, funções inexistentes ou documentação falsa. Todo o código fornecido deve compilar e ser funcional.
-- Explica a arquitetura, mitiga pontos únicos de falha e assegura alta disponibilidade.`,
+  geral: PESSOAL_PROMPT,
+  pessoal: PESSOAL_PROMPT,
 
-  frotas: `És o Especialista Sénior de Operações Rodoviárias e Auditor de Frotas de André Pinheiro.
-Atuas em conformidade estrita com o Regulamento (CE) n.º 561/2006, a Diretiva 2002/15/CE e o Pacote de Mobilidade I da União Europeia.
-DIRETRIZES:
-- Rigor matemático e legal no cálculo de tacógrafo digital:
-  * Condução contínua: máx 4h30 ➔ pausa obrigatória de 45m (ou 15m + 30m).
-  * Condução diária: máx 9h (extensível a 10h 2x por semana).
-  * Repouso diário regular (11h ou 3h + 9h) e reduzido (9h, máx 3x por semana).
-- Roteamento e alturas: A4, A1, A3, A7, A11, A28, IP4, Túnel do Marão e viadutos.
-- ZERO DELÍRIOS: Se uma rota ou limite de altura (ex: gabarit de túneis) requerer confirmação local, emite alerta de segurança preventivo imediato.`,
+  dev: `És o Engenheiro de Software Principal e Arquiteto Cloud 100% Cloud-Native de André Pinheiro.
+${PERSONAL_POLICY}
+- Especialista em Node.js, Telegraf, SQLite WAL + Google Drive Write-Through, GitHub Octokit API, GitHub Actions (compilação Android APK na nuvem), Vercel e Render.
+- Fornece apenas código válido e verificável, sem bibliotecas nem funções inventadas.`,
 
-  immo: `És o Perito Avaliador Imobiliário Oficial e Auditor de Investimentos de André Pinheiro.
-Atuas segundo as Normas Oficiais da CMVM (Regulamento n.º 2/2015) e as Normas Europeias de Avaliação (EVS - TEGoVA).
-DIRETRIZES:
-- ZERO DELÍRIOS: É PROIBIDO inventar imóveis, moradias ou links falsos de portais imobiliários. Apenas analisa anúncios reais fornecidos pelo utilizador ou pesquisas diretas nos portais oficiais (Idealista, Imovirtual, Casa Sapo, ERA, RE/MAX).
-- Critérios Periciais CMVM em Amarante: Construção nova/reconstruída: 1.350 €/m² (U.F. Amarante centro) e 1.180 €/m² (periferia); Terreno: 35 €/m² (<500m²); Eficiência energética (CAPEX obras); Desconto legal sem licença (-25%).
-- Relatórios objetivos: discrimina preço pedido, valor intrínseco CMVM, encargos fiscais (IMT/Selo) e viabilidade financeira real.`,
+  immo: `És o Auditor de Oportunidades e Perito Avaliador Imobiliário CMVM de André Pinheiro.
+${PERSONAL_POLICY}
+- Avalias 5 Frentes: (1) Moradias/Terrenos Amarante (norma CMVM: 1.350 €/m² centro U.F. Amarante, 1.180 €/m² periferia, 1.120 €/m² limítrofes; terreno escalonado 35/8/2 €/m²; desconto sem licença -25%), (2) Carros (EV >300km, PHEV, combustão), (3) Tech PT/ES, (4) Amazon.es & Segunda Mano, (5) Apple Novo (3 anos garantia) vs Recondicionado Grau A.
+- NUNCA inventes anúncios nem URLs de portais.`,
 
-  pessoal: `És o Gestor Executivo de Operações Familiares e Produtividade de André Pinheiro.
-Atuas sob os princípios de discrição, confidencialidade (RGPD) e eficiência organizacional.
-DIRETRIZES:
-- Organização estrita de prioridades: compras, rotinas domésticas, saúde e escola da Carolina.
-- Comunicação direta, estruturada em checklists práticas e orientada à resolução imediata de pendências.`,
-
-  nutricao: `És o Consultor Desportivo e Nutricional de André Pinheiro.
-Atuas com base na literatura científica europeia de nutrição desportiva (EFSA / ISSN).
-DIRETRIZES:
-- Meta: 160g de Proteína diária (~2g/kg), hidratação (2.5L a 3.0L) e 5g de Creatina.
-- Sugestões práticas baseadas exclusivamente em produtos reais disponíveis no mercado português (Continente, Lidl, Mercadona, Pingo Doce).
-- Factualidade total: contabilidade precisa de macronutrientes sem valores inventados.`
+  nutricao: `És o Especialista em Nutrição Desportiva e Alta Proteína de André Pinheiro (normas EFSA/ISSN).
+${PERSONAL_POLICY}
+- Meta diária: 160g proteína (~2g/kg), 2.5L água (2500ml), 5g creatina diária.
+- Quando gerares receitas (Airfryer, Monsieur Cuisine Connect ou Gerais), usa ingredientes reais de supermercados portugueses (Lidl, Continente, Pingo Doce, Mercadona) e garante sempre cálculo transparente de macronutrientes por dose incluindo a % da meta de 160g.`
 };
 
-// ─── Chamada ao Google Gemini (Multi-Turn com Fallback Resiliente) ──────────
+// ─── Cascata Unificada (1. Gemini -> 2. Groq -> 3. OpenRouter | temp = 0.0) ──
 
-async function callGemini(chatId, workerTag, prompt, extraContext = '') {
-  if (!GEMINI_API_KEY) return null;
+async function callGemini({ systemInstruction, history = [], userText, maxTokens = 1600 }) {
+  const { gemini } = getKeys();
+  if (!gemini) return null;
 
-  const systemInstruction = SYSTEM_PROMPTS[workerTag] || SYSTEM_PROMPTS.master;
-  const history = conversationMemory.getGeminiHistory(chatId, workerTag);
-
-  let userText = prompt;
-  if (extraContext) {
-    userText = `[Contexto adicional do sistema: ${extraContext}]\n\n${prompt}`;
-  }
-
-  const contents = [
-    ...history,
-    {
-      role: 'user',
-      parts: [{ text: userText }]
-    }
-  ];
-
+  const contents = [...history, { role: 'user', parts: [{ text: userText }] }];
   const payload = {
-    system_instruction: {
-      parts: [{ text: systemInstruction }]
-    },
+    system_instruction: { parts: [{ text: systemInstruction }] },
     contents,
     generationConfig: {
       temperature: 0.0,
-      maxOutputTokens: 1400,
+      maxOutputTokens: maxTokens,
       topP: 0.1
     }
   };
 
-  const models = ['gemini-flash-lite-latest', 'gemini-flash-latest'];
-  for (const model of models) {
+  for (const model of ['gemini-flash-latest', 'gemini-flash-lite-latest']) {
     try {
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
       const res = await axios.post(endpoint, payload, {
         headers: {
           'Content-Type': 'application/json',
-          'X-goog-api-key': GEMINI_API_KEY
-        },
-        timeout: 5000
-      });
-      const reply = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (reply && reply.trim().length > 0) {
-        conversationMemory.addTurn(chatId, workerTag, 'user', prompt);
-        conversationMemory.addTurn(chatId, workerTag, 'model', reply.trim());
-        return reply.trim();
-      }
-    } catch (err) {
-      log.warn(`Gemini [${model}] falhou [${workerTag}]: ${err.response?.data?.error?.message || err.message}`);
-    }
-  }
-
-  return null;
-}
-
-// ─── Fallback ao Groq LPU (GPT-OSS-20B / Qwen 3.8) ──────────────────────────
-
-async function callGroqFallback(chatId, workerTag, prompt, extraContext = '') {
-  if (!GROQ_API_KEY) return null;
-
-  const systemInstruction = SYSTEM_PROMPTS[workerTag] || SYSTEM_PROMPTS.master;
-  const history = conversationMemory.getOpenAiHistory(chatId, workerTag);
-
-  let userText = prompt;
-  if (extraContext) {
-    userText = `[Contexto adicional: ${extraContext}]\n\n${prompt}`;
-  }
-
-  const messages = [
-    { role: 'system', content: systemInstruction },
-    ...history,
-    { role: 'user', content: userText }
-  ];
-
-  const groqModels = ['qwen/qwen3.8-27b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
-  for (const model of groqModels) {
-    try {
-      const payload = {
-        model,
-        messages,
-        temperature: 0.0,
-        max_tokens: 850
-      };
-
-      const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', payload, {
-        headers: {
-          Authorization: `Bearer ${GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 6000
-      });
-
-      const reply = res.data?.choices?.[0]?.message?.content;
-      if (reply && reply.trim().length > 0) {
-        conversationMemory.addTurn(chatId, workerTag, 'user', prompt);
-        conversationMemory.addTurn(chatId, workerTag, 'assistant', reply.trim());
-        return reply.trim();
-      }
-    } catch (err) {
-      log.warn(`Groq [${model}] falhou [${workerTag}]: ${err.response?.data?.error?.message || err.message}`);
-    }
-  }
-
-  return null;
-}
-
-// ─── Fallback ao OpenRouter (Modelos Gratuitos Multi-Provedor) ──────────────
-
-async function callOpenRouterFallback(chatId, workerTag, prompt, extraContext = '') {
-  if (!OPENROUTER_API_KEY) return null;
-
-  const systemInstruction = SYSTEM_PROMPTS[workerTag] || SYSTEM_PROMPTS.master;
-  const history = conversationMemory.getOpenAiHistory(chatId, workerTag);
-
-  let userText = prompt;
-  if (extraContext) {
-    userText = `[Contexto adicional: ${extraContext}]\n\n${prompt}`;
-  }
-
-  const messages = [
-    { role: 'system', content: systemInstruction },
-    ...history,
-    { role: 'user', content: userText }
-  ];
-
-  const orModels = ['openrouter/free', 'liquid/lfm-3-1.7b:free', 'nvidia/nemotron-3.5-lightning:free'];
-  for (const model of orModels) {
-    try {
-      const res = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
-        model,
-        messages,
-        temperature: 0.0,
-        max_tokens: 850
-      }, {
-        headers: {
-          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://github.com/andre22pinheiro-ui/telegram-master-bot',
-          'X-Title': 'Telegram Master Bot'
+          'X-goog-api-key': gemini
         },
         timeout: 9000
       });
-
-      const reply = res.data?.choices?.[0]?.message?.content;
+      const reply = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
       if (reply && reply.trim().length > 0) {
-        conversationMemory.addTurn(chatId, workerTag, 'user', prompt);
-        conversationMemory.addTurn(chatId, workerTag, 'assistant', reply.trim());
-        return reply.trim();
+        return { text: reply.trim(), provider: `gemini:${model}` };
       }
     } catch (err) {
-      log.warn(`OpenRouter [${model}] falhou [${workerTag}]: ${err.response?.data?.error?.message || err.message}`);
+      log.warn(`Gemini [${model}] falhou: ${err.response?.data?.error?.message || err.message}`);
     }
   }
-
   return null;
 }
 
-// ─── Ponto de Entrada Central para Resolução de Problemas Complexos ──────────
+async function callOpenAiCompatible({ url, headers, models, systemInstruction, history = [], userText, maxTokens = 1600, providerName }) {
+  const messages = [
+    { role: 'system', content: systemInstruction },
+    ...history,
+    { role: 'user', content: userText }
+  ];
 
+  for (const model of models) {
+    try {
+      const res = await axios.post(
+        url,
+        {
+          model,
+          messages,
+          temperature: 0.0,
+          max_tokens: maxTokens
+        },
+        { headers, timeout: 9000 }
+      );
+      const reply = res.data?.choices?.[0]?.message?.content;
+      if (reply && reply.trim().length > 0) {
+        return { text: reply.trim(), provider: `${providerName}:${model}` };
+      }
+    } catch (err) {
+      log.warn(`${providerName} [${model}] falhou: ${err.response?.data?.error?.message || err.message}`);
+    }
+  }
+  return null;
+}
+
+async function callGroq({ systemInstruction, history = [], userText, maxTokens = 1600 }) {
+  const { groq, groqModel } = getKeys();
+  if (!groq) return null;
+  const models = [...new Set([groqModel, 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b'].filter(Boolean))];
+  return await callOpenAiCompatible({
+    url: 'https://api.groq.com/openai/v1/chat/completions',
+    headers: { Authorization: `Bearer ${groq}`, 'Content-Type': 'application/json' },
+    models,
+    systemInstruction,
+    history,
+    userText,
+    maxTokens,
+    providerName: 'groq'
+  });
+}
+
+async function callOpenRouter({ systemInstruction, history = [], userText, maxTokens = 1600 }) {
+  const { openrouter } = getKeys();
+  if (!openrouter) return null;
+  return await callOpenAiCompatible({
+    url: 'https://openrouter.ai/api/v1/chat/completions',
+    headers: {
+      Authorization: `Bearer ${openrouter}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://github.com/andre22pinheiro-ui/telegram-master-bot',
+      'X-Title': 'Grok Bot (@AndrePinheirobot)'
+    },
+    models: ['openrouter/free', 'liquid/lfm-3-1.7b:free', 'nvidia/nemotron-3.5-lightning:free'],
+    systemInstruction,
+    history,
+    userText,
+    maxTokens,
+    providerName: 'openrouter'
+  });
+}
+
+/**
+ * Inferência sem histórico conversacional (usado por routers JSON e formatadores determinísticos).
+ */
+export async function generateDeterministicCompletion({ systemPrompt, prompt, maxTokens = 1200 }) {
+  const sys = systemPrompt || SYSTEM_PROMPTS.master;
+  const trimmed = String(prompt || '').trim();
+  if (!trimmed) return null;
+
+  return (
+    (await callGemini({ systemInstruction: sys, userText: trimmed, maxTokens })) ||
+    (await callGroq({ systemInstruction: sys, userText: trimmed, maxTokens })) ||
+    (await callOpenRouter({ systemInstruction: sys, userText: trimmed, maxTokens })) ||
+    null
+  );
+}
+
+/**
+ * Ponto de Entrada Conversacional com Memória Multi-Turn SQLite.
+ */
 export async function askAgent({ chatId = '950415577', workerTag = 'master', prompt, extraContext = '' }) {
   if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
-    return 'Por favor, escreve uma pergunta ou desafio para eu analisar.';
+    return 'Por favor, escreve uma pergunta ou tarefa para eu analisar.';
   }
 
   const trimmed = prompt.trim();
-
-  // Comandos de controle de memória
   if (/^\/(reset|limpar|novo|nova_conversa)\b/i.test(trimmed)) {
     conversationMemory.clear(chatId, workerTag);
-    return '🔄 *Memória da conversa reiniciada!* Podes iniciar um novo tema ou desafio do zero.';
+    return '🔄 *Memória da conversa reiniciada!* Podes iniciar um novo tema do zero.';
   }
 
-  // 1. Motor Principal de Alta Performance: Groq LPU (~230ms de latência)
-  let answer = await callGroqFallback(chatId, workerTag, trimmed, extraContext);
+  const systemInstruction = SYSTEM_PROMPTS[workerTag] || SYSTEM_PROMPTS.master;
+  const userText = extraContext ? `[Contexto verificado do sistema: ${extraContext}]\n\n${trimmed}` : trimmed;
 
-  // 2. Fallback Secundário de Resiliência: OpenRouter (Multi-provedor gratuito)
-  if (!answer) {
-    log.info(`A recorrer ao OpenRouter Free para [${workerTag}]...`);
-    answer = await callOpenRouterFallback(chatId, workerTag, trimmed, extraContext);
+  // 1. Primário: Google Gemini (temp = 0.0)
+  const geminiHistory = conversationMemory.getGeminiHistory(chatId, workerTag);
+  let result = await callGemini({ systemInstruction, history: geminiHistory, userText });
+
+  // 2. Secundário: Groq LPU (temp = 0.0)
+  if (!result) {
+    const openAiHistory = conversationMemory.getOpenAiHistory(chatId, workerTag);
+    result = await callGroq({ systemInstruction, history: openAiHistory, userText });
+
+    // 3. Terciário: OpenRouter (temp = 0.0)
+    if (!result) {
+      result = await callOpenRouter({ systemInstruction, history: openAiHistory, userText });
+    }
   }
 
-  // 3. Fallback Terciário: Google Gemini
-  if (!answer && GEMINI_API_KEY) {
-    log.info(`A recorrer ao Google Gemini para [${workerTag}]...`);
-    answer = await callGemini(chatId, workerTag, trimmed, extraContext);
-  }
-
-  if (answer) {
-    return answer;
+  if (result?.text) {
+    conversationMemory.addTurn(chatId, workerTag, 'user', trimmed);
+    conversationMemory.addTurn(chatId, workerTag, 'model', result.text);
+    return result.text;
   }
 
   return (
-    '⚠️ Os motores de inteligência artificial na nuvem estão temporariamente sobrecarregados.\n\n' +
-    'Tenta reformular a tua pergunta ou utiliza os comandos específicos do menu.'
+    '⚠️ Os motores de inteligência artificial na nuvem estão temporariamente indisponíveis ou sem chaves configuradas.\n\n' +
+    'Tenta novamente em instantes ou utiliza os comandos diretos (`/ajuda`).'
   );
 }
 
 export default {
   askAgent,
+  generateDeterministicCompletion,
   conversationMemory,
   SYSTEM_PROMPTS
 };
