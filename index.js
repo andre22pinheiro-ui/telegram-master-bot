@@ -35,10 +35,10 @@ import {
 } from './src/shared/security.js';
 import { getTvCockpit, searchChannels, formatSearchResults, getXtreamCredentialsMarkdown, getVlcHelpMarkdown } from './src/services/tvService.js';
 import { initCloudPersistence, isDriveConfigured, getDriveSyncStatus, backupDatabaseToDrive, startAutoDriveSync } from './src/services/googleDriveService.js';
-import { iniciarAgendadorRadar, dispararCicloRadarComAlertas, gerarRelatorioMultiFrenteMarkdown } from './src/services/immoRadarService.js';
+import { dispararCicloRadarComAlertas, gerarRelatorioMultiFrenteMarkdown } from './src/services/immoRadarService.js';
 import { formatarSitesImobiliariosMarkdown, buildImmoSitesKeyboard } from './src/shared/immoSitesCatalog.js';
 import { getDailyNewsBriefing, getRegionalNews, getGovNews } from './src/services/newsService.js';
-import { getEmailBriefing, getEmailStatus } from './src/services/emailService.js';
+import { startProactiveEngine, stopProactiveEngine } from './src/services/proactiveEngine.js';
 
 const log = createLogger('Master');
 
@@ -616,32 +616,18 @@ const server = http.createServer((req, res) => {
   res.end(JSON.stringify({ error: 'Endpoint não encontrado' }));
 });
 
-// ─── Arranque & Agendadores Europe/Lisbon ────────────────────────────────────
-
-function getLisbonClock() {
-  const now = new Date();
-  const [hh, mm] = new Intl.DateTimeFormat('pt-PT', {
-    timeZone: 'Europe/Lisbon',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  })
-    .format(now)
-    .split(':')
-    .map((n) => parseInt(n, 10));
-  return {
-    hour: hh,
-    minute: mm,
-    dayKey: now.toLocaleDateString('pt-PT', { timeZone: 'Europe/Lisbon' })
-  };
-}
+// ─── Encerramento Gracioso ───────────────────────────────────────────────────
 
 let isShuttingDown = false;
 
 async function handleGracefulShutdown(signal) {
   if (isShuttingDown) return;
   isShuttingDown = true;
-  log.info(`🛑 Sinal ${signal} recebido. A executar backup final Google Drive antes de encerrar...`);
+  log.info(`🛑 Sinal ${signal} recebido. A parar motor proativo e a executar backup final Google Drive...`);
+
+  try {
+    stopProactiveEngine();
+  } catch {}
 
   try {
     sqliteMasterDb.checkpoint();
@@ -681,16 +667,9 @@ async function startMasterBot() {
 
   sqliteMasterDb.getDb();
 
-  // 2. Iniciar servidor HTTP e Keep-Alive 10m
+  // 2. Iniciar servidor HTTP (Keep-Alive Render 10m gerido pelo ProactiveEngine)
   server.listen(PORT, () => {
     log.info(`Servidor HTTP 100% Cloud-Native ativo na porta ${PORT} (@AndrePinheirobot | /webhook/master)`);
-    const keepAliveUrl = process.env.RENDER_EXTERNAL_URL || 'https://telegram-master-bot-0h2h.onrender.com';
-    if (process.env.RENDER || process.env.NODE_ENV === 'production' || process.env.RENDER_EXTERNAL_URL) {
-      setInterval(() => {
-        fetch(`${keepAliveUrl.replace(/\/$/, '')}/health`).catch(() => {});
-      }, 10 * 60 * 1000).unref();
-      log.info(`📡 Keep-Alive Render ativo: ${keepAliveUrl}/health a cada 10 min.`);
-    }
   });
 
   startAutoDriveSync(15);
@@ -713,57 +692,8 @@ async function startMasterBot() {
     log.info('✅ @AndrePinheirobot ativo em modo Polling local!');
   }
 
-  // Agendador Multi-Frente 5 Frentes (08h30 + 4h em 4h 08h-22h Lisboa)
-  iniciarAgendadorRadar(bot);
-
-  // Agendador Briefing Matinal às 08h00 Europe/Lisbon (Notícias Certificadas + Emails)
-  let lastNewsDay = null;
-  setInterval(async () => {
-    const { hour, minute, dayKey } = getLisbonClock();
-    if (hour === 8 && minute === 0 && lastNewsDay !== dayKey) {
-      lastNewsDay = dayKey;
-      try {
-        const newsBriefing = await getDailyNewsBriefing(true);
-        let fullBriefing = newsBriefing;
-        if (getEmailStatus().configured) {
-          const emailBriefing = await getEmailBriefing(5).catch(() => null);
-          if (emailBriefing) {
-            fullBriefing += `\n\n━━━━━━━━━━━━━━━━━━\n${emailBriefing}`;
-          }
-        }
-        await bot.telegram.sendMessage(CHAT_ID_AUTORIZADO, fullBriefing.slice(0, 4000), {
-          parse_mode: 'Markdown',
-          disable_web_page_preview: true
-        }).catch(async () => {
-          await bot.telegram.sendMessage(CHAT_ID_AUTORIZADO, fullBriefing.slice(0, 4000).replace(/[*_`]/g, ''), {
-            disable_web_page_preview: true
-          }).catch(() => {});
-        });
-      } catch (err) {
-        log.error('Erro briefing matinal 08:00:', err.message);
-      }
-    }
-  }, 30000).unref();
-
-  // Agendador Lembretes Proativos a cada 15 segundos
-  setInterval(async () => {
-    try {
-      const due = sqliteMasterDb.getPendingDueReminders();
-      for (const rem of due) {
-        const target = rem.chat_id || CHAT_ID_AUTORIZADO;
-        const hora = new Date(rem.trigger_at).toLocaleTimeString('pt-PT', { timeZone: 'Europe/Lisbon', hour: '2-digit', minute: '2-digit', hour12: false });
-        const alerta =
-          `🔔 *ALERTA DE LEMBRETE!*\n` +
-          `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-          `⏰ *Assunto:* *${rem.text}*\n` +
-          `⏱️ *Agendado:* ${hora} (${rem.created_by_name || 'André'})`;
-        await bot.telegram.sendMessage(target, alerta, { parse_mode: 'Markdown' }).catch(async () => {
-          await bot.telegram.sendMessage(target, alerta.replace(/[*_`]/g, '')).catch(() => {});
-        });
-        sqliteMasterDb.markReminderSent(rem.id);
-      }
-    } catch {}
-  }, 15000).unref();
+  // 3. Motor Proativo Unificado (node-cron Europe/Lisbon + Silêncio Noturno 22:30-07:30 + Lembretes 15s)
+  startProactiveEngine(bot);
 }
 
 startMasterBot();

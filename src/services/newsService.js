@@ -232,6 +232,69 @@ export async function getGovNews(forceRefresh = false) {
 }
 
 /**
+ * Previsão meteorológica e avisos IPMA em tempo real para o Porto / Tâmega e Sousa (globalIdLocal 1131200, PTO).
+ */
+export async function fetchIpmaPortoWeather() {
+  const result = {
+    source: 'IPMA (api.ipma.pt — Distrito do Porto / Tâmega e Sousa)',
+    globalIdLocal: 1131200,
+    forecast: null,
+    warnings: [],
+    error: null
+  };
+
+  try {
+    const [forecastRes, warningsRes] = await Promise.all([
+      fetch('https://api.ipma.pt/open-data/forecast/meteorology/cities/daily/1131200.json', {
+        signal: AbortSignal.timeout(4000)
+      }),
+      fetch('https://api.ipma.pt/open-data/forecast/warnings/warnings_www.json', {
+        signal: AbortSignal.timeout(4000)
+      }).catch(() => null)
+    ]);
+
+    if (forecastRes?.ok) {
+      const json = await forecastRes.json();
+      const today = Array.isArray(json?.data) && json.data.length > 0 ? json.data[0] : null;
+      if (today) {
+        result.forecast = {
+          forecastDate: today.forecastDate || null,
+          tMin: today.tMin ?? null,
+          tMax: today.tMax ?? null,
+          precipitaProb: today.precipitaProb ?? null,
+          predWindDir: today.predWindDir || null,
+          idWeatherType: today.idWeatherType ?? null,
+          classPrecInt: today.classPrecInt ?? null
+        };
+      }
+    }
+
+    if (warningsRes?.ok) {
+      const wJson = await warningsRes.json();
+      if (Array.isArray(wJson)) {
+        result.warnings = wJson
+          .filter(
+            (w) =>
+              w?.idAreaAviso === 'PTO' &&
+              w?.awarenessLevelID &&
+              String(w.awarenessLevelID).toLowerCase() !== 'green'
+          )
+          .map((w) => ({
+            idAreaAviso: w.idAreaAviso,
+            awarenessLevelID: w.awarenessLevelID,
+            awarenessTypeName: w.awarenessTypeName || 'Aviso Meteorológico',
+            text: w.text || ''
+          }));
+      }
+    }
+  } catch (err) {
+    result.error = err.message;
+  }
+
+  return result;
+}
+
+/**
  * Briefing Matinal Unificado das 08h00 & Comando /noticias
  */
 export async function getDailyNewsBriefing(forceRefresh = false) {
@@ -240,17 +303,33 @@ export async function getDailyNewsBriefing(forceRefresh = false) {
     return cacheStore.briefing.text;
   }
 
-  const [pais, economia, amarante, governo, alertas] = await Promise.all([
+  const [pais, economia, amaranteRss, amaranteCm, governo, alertas, ipmaLive] = await Promise.all([
     fetchRssSafe(RSS_FEEDS.pais, 3),
     fetchRssSafe(RSS_FEEDS.economia, 2),
     fetchRssSafe(RSS_FEEDS.averdade, 2),
-    fetchTrustedWebItems('site:portugal.gov.pt comunicados noticias', 2),
-    fetchTrustedWebItems('site:ipma.pt OR site:prociv.gov.pt avisos meteorologicos amarante norte', 2)
+    fetchTrustedWebItems('site:cm-amarante.pt OR "CIM Tâmega e Sousa" OR "A4" "Marão" OR "EN15" amarante', 2),
+    fetchTrustedWebItems('site:portugal.gov.pt OR site:diariodarepublica.pt comunicados noticias', 2),
+    fetchTrustedWebItems('site:ipma.pt OR site:prociv.gov.pt OR site:cm-amarante.pt avisos meteorologicos amarante norte', 2),
+    fetchIpmaPortoWeather()
   ]);
+  const amarante = [...amaranteRss, ...amaranteCm].slice(0, 3);
 
   const ts = formatDatePt(new Date());
   let msg = `🗞️ *BRIEFING OFICIAL CERTIFICADO*\n`;
   msg += `🕒 _Lisboa: ${ts} | Zero fontes não verificadas_\n\n`;
+
+  if (ipmaLive?.forecast) {
+    const f = ipmaLive.forecast;
+    msg += `🌤️ *IPMA Porto/Amarante (${f.forecastDate || 'Hoje'}):* ${f.tMin ?? '?'}°C a ${f.tMax ?? '?'}°C | Precip.: ${f.precipitaProb ?? '?'}% | Vento: ${f.predWindDir || 'N/D'}\n`;
+  }
+  if (Array.isArray(ipmaLive?.warnings) && ipmaLive.warnings.length > 0) {
+    for (const w of ipmaLive.warnings.slice(0, 2)) {
+      msg += `⚠️ *Aviso IPMA PTO (${String(w.awarenessLevelID).toUpperCase()}):* ${w.awarenessTypeName}${w.text ? ` — ${w.text}` : ''}\n`;
+    }
+  }
+  if (ipmaLive?.forecast || (ipmaLive?.warnings && ipmaLive.warnings.length > 0)) {
+    msg += '\n';
+  }
 
   msg += `🇵🇹 *Portugal & Serviço Público (RTP / Lusa):*\n`;
   msg += renderItemLines(pais, 'https://www.rtp.pt/noticias');
@@ -280,6 +359,7 @@ export async function getDailyNewsBriefing(forceRefresh = false) {
 export default {
   TRUSTED_SOURCES,
   isTrustedSource,
+  fetchIpmaPortoWeather,
   getDailyNewsBriefing,
   getRegionalNews,
   getGovNews

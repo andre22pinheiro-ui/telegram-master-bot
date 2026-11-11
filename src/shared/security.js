@@ -6,6 +6,21 @@ import { createLogger } from "../utils/logger.js";
 
 const log = createLogger("Security");
 
+// ─── Mascaramento RGPD (Regulamento UE 2016/679) ────────────────────────────
+export function maskEmailRgpd(email = "") {
+  const raw = String(email || "").trim();
+  if (!raw.includes("@")) return raw ? "***" : "";
+  const [local, domain] = raw.split("@");
+  const maskedLocal = local.length > 3 ? `${local.slice(0, 2)}***${local.slice(-1)}` : "***";
+  return `${maskedLocal}@${domain || "***"}`;
+}
+
+export function maskPhoneRgpd(phone = "") {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (digits.length < 4) return "***";
+  return `${"*".repeat(Math.max(3, digits.length - 3))}${digits.slice(-3)}`;
+}
+
 // ─── Contactos Telefónicos Autorizados ──────────────────────────────────────
 export const AUTHORIZED_PHONES = [
   "919115655",
@@ -44,9 +59,9 @@ function saveAuthStore(data) {
     const dir = path.dirname(AUTH_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(AUTH_FILE, JSON.stringify(data, null, 2), "utf-8");
-    // Sincronizar quase em tempo real para o Google Drive
+    // Sincronizar quase em tempo real (5s write-through) para o Google Drive
     import("../services/googleDriveService.js")
-      .then(m => m.triggerDebouncedDriveSync?.(10000))
+      .then(m => (m.triggerCloudSyncDebounced || m.triggerDebouncedDriveSync)?.(5000))
       .catch(() => {});
   } catch (err) {
     log.error("Erro ao guardar autorizados.json:", err.message);
@@ -89,7 +104,7 @@ export function authorizeContact(userId, chatId, rawPhone, name = "Utilizador") 
   authStore.phoneMapping[uid] = cleanPhone;
   saveAuthStore(authStore);
 
-  log.info(`✅ Novo contacto validado e autorizado com sucesso: ${name} (${cleanPhone}) [ID: ${uid}]`);
+  log.info(`✅ Novo contacto validado e autorizado com sucesso: ${name} (${maskPhoneRgpd(cleanPhone)}) [ID: ${uid}]`);
   return { success: true, phone: cleanPhone, name };
 }
 
@@ -159,7 +174,7 @@ export async function authMiddleware(ctx, next) {
       );
       return;
     } else {
-      log.warn(`⛔ Tentativa de validação falhada com número não autorizado: ${contact.phone_number} (ID: ${userId})`);
+      log.warn(`⛔ Tentativa de validação falhada com número não autorizado: ${maskPhoneRgpd(contact.phone_number)} (ID: ${userId})`);
       await ctx.reply(
         `⛔ *Acesso Recusado*\n━━━━━━━━━━━━━━━━━━━━━━━━\n` +
         `O número (*+${contact.phone_number}*) não consta da lista restrita de contactos autorizados (*919 115 655* e *933 276 221*).\n\n` +

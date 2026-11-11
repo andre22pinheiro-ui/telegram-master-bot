@@ -45,9 +45,9 @@ export function evaluateAppleComparison(novoPrice, refurbPrice) {
     return { diferenca, pctPoupanca: pct, recomenda: `✅ COMPENSA RECONDICIONADO GRAU A (Poupa ${diferenca} € | -${pct}%)` };
   }
   if (diferenca < 80) {
-    return { diferenca, pctPoupanca: pct, recomenda: `🆕 PREFERIR NOVO SELADO (Diferença de apenas ${diferenca} € vale 3 anos garantia + bateria 100%)` };
+    return { diferenca, pctPoupanca: pct, recomenda: `🆕 PREFERIR NOVO SELADO (Diferença de apenas ${diferenca} € vale 3 anos garantia DL 84/2021 + bateria 100%)` };
   }
-  return { diferenca, pctPoupanca: pct, recomenda: `⚖️ EQUILIBRADO (Poupança ${diferenca} € / ${pct}% — validar garantia 36 meses)` };
+  return { diferenca, pctPoupanca: pct, recomenda: `⚖️ EQUILIBRADO (Poupança ${diferenca} € / ${pct}% — validar garantia DL 84/2021, bateria >=85% e peças originais)` };
 }
 
 export async function searchApple(query = 'iPhone 15 Pro 256GB') {
@@ -101,8 +101,8 @@ export async function scanApple() {
 }
 
 export function formatAppleMarkdown({ query = '', items = [], novos = [], refurbs = [], comparison = null }) {
-  let md = `🍎 *RADAR APPLE: NOVO SELADO (3A) vs RECONDICIONADO GRAU A*\n`;
-  md += `🔍 *Modelo:* \`${query}\`\n`;
+  let md = `🍎 *RADAR APPLE: NOVO SELADO (3A DL 84/2021) vs RECONDICIONADO GRAU A*\n`;
+  md += `🔍 *Modelo:* \`${query}\` | ⚖️ *Conformidade:* DL n.º 84/2021 & Dir. Omnibus (UE) 2019/2161\n`;
   md += `━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
   if (novos.length > 0 && refurbs.length > 0 && comparison?.diferenca > 0) {

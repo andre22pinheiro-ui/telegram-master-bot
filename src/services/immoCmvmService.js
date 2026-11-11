@@ -264,7 +264,8 @@ export function formatarAvaliacaoMarkdown(av) {
     }
   }
 
-  md += `\n🌐 _Calculado com as normas da Mini App:_ \`https://pesquisa-imobiliario.vercel.app\``;
+  md += `\n⚖️ _Enquadramento: Regulamento CMVM n.º 2/2015, DL n.º 10/2024 (Simplex Urbanístico) e PDM de Amarante / RMUE._\n`;
+  md += `🌐 _Referência WebApp:_ \`https://pesquisa-imobiliario.vercel.app\``;
   return md;
 }
 

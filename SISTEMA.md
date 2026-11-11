@@ -21,7 +21,8 @@ flowchart TB
     Router["masterRouter.js (Triagem + Redirecionamento Frotas)"]
     Workers["Workers: geral | nutricao | immo | dev"]
     IA["reasoningService.js (temp: 0.0: Gemini -> Groq -> OpenRouter)"]
-    Services["newsService (ERC) | emailService | combustiveis | farmacias | Radar 5 Frentes"]
+    Services["newsService (ERC/IPMA) | proactiveEngine (node-cron) | emailService | combustiveis | Radar 5 Frentes"]
+    DevCloud["cloudDevService.js + worker_dev.js (GitHub Actions / Vercel)"]
     DB["SQLite WAL ./data/pessoal_master.db (16 Tabelas)"]
     GDrive["Google Drive Write-Through (Boot Restore + 5s Debounce + 15m + SIGTERM)"]
   end
@@ -33,7 +34,8 @@ flowchart TB
 
   subgraph WorkCore["Domínio Exclusivo Trabalho & Frotas (Serviço Render Separado)"]
     ZPAI["intentClassifier.js & dispatcher.js"]
-    ZPRoute["routeService.js (/rota ORS driving-hgv + /tacografo CE 561/2006)"]
+    ZPRoute["routeService.js (/rota ORS driving-hgv + /tacografo CE 561/2006 & UE 165/2014)"]
+    ZPProactive["fleetProactiveService.js (Proatividade Em Turno + Alertas 30m/15m)"]
     ZPSupabase["AppFrota / Supabase"]
   end
 
@@ -62,12 +64,19 @@ flowchart TB
 3. **Webhooks Únicos Sem Conflito:**
    - Serviço Pessoal: `POST /webhook/master` (`TELEGRAM_BOT_TOKEN_MASTER`).
    - Serviço Frotas: `POST /webhook/frota` (`TELEGRAM_FROTAS_TOKEN`, com verificação opcional `TELEGRAM_WEBHOOK_SECRET`).
-4. **Rotinas Autónomas (`Europe/Lisbon`):**
-   - **Keep-Alive Render:** Ping HTTP a `${RENDER_EXTERNAL_URL}/health` a cada **10 minutos**.
-   - **08:00 (`Europe/Lisbon`):** Briefing Matinal Integrado — Notícias Certificadas ([`getDailyNewsBriefing`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/newsService.js)) + Resumo de Emails IMAP ([`getEmailBriefing`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/emailService.js)).
+4. **Rotinas Autónomas Proativas ([`proactiveEngine.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/proactiveEngine.js) via `node-cron` em `Europe/Lisbon`):**
+   - **Janela de Silêncio Noturno (`22:30` – `07:30`):** Nenhuma notificação automática rotineira é enviada neste período; **apenas lembretes familiares críticos devidos** (`reminders`) contornam o silêncio.
+   - **Keep-Alive Render & RAM (`*/10 * * * *`):** Ping HTTP a `${RENDER_EXTERNAL_URL}/health` + monitorização de memória RSS (`450MB` threshold) a cada **10 minutos**.
+   - **08:00 (`Europe/Lisbon`):** Briefing Executivo Matinal Unificado ([`buildMorningExecutiveBriefing`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/proactiveEngine.js)) — Notícias Certificadas + CM Amarante/CIM/A4-EN15/DRE + Previsão e Avisos IPMA Porto/Amarante (`1131200` / `PTO`) + Combustíveis DGEG Amarante/Lixa + Emails IMAP + Tarefas Pendentes.
    - **08:30 (`Europe/Lisbon`):** Relatório diário consolidado do Radar 5 Frentes ([`gerarRelatorioMultiFrenteMarkdown`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/immoRadarService.js)).
-   - **Ciclos de 4 em 4h (`08:05`, `12:05`, `16:05`, `20:05` `Europe/Lisbon`):** Varredura Multi-Frente + filtros `/vigiar` (`dispararCicloRadarComAlertas`), com registo em `radar_execucoes` e alerta apenas para novidades, descidas de preço ou correspondências de filtros.
-   - **A cada 15 segundos:** Verificação e disparo de lembretes proativos pendentes (`getPendingDueReminders`).
+   - **Ciclos de 4 em 4h (`08:05`, `12:05`, `16:05`, `20:05` `Europe/Lisbon`):** Varredura Multi-Frente + filtros `/vigiar` (`dispararCicloRadarComAlertas`), alertando exclusivamente em novidades ou descidas de preço reais.
+   - **13:00 & 20:00 (`Europe/Lisbon`):** Check-in Proativo de Nutrição EFSA/ISSN (`evaluateNutritionProactiveCheck`); às `20:00`, se a proteína diária for `< 70%` (`< 112g` de `160g`), sugere receita rápida `/receita_mcc` ou `/receita_airfryer` com ervas aromáticas diretas e zero refogado.
+   - **A cada 15 segundos:** Despacho imediato de lembretes críticos devidos (`dispatchDueReminders`, imune ao silêncio noturno).
+
+5. **Conformidade Normativa Tripla Obrigatória (`temperature: 0.0`):**
+   - **União Europeia:** EU AI Act (`Reg. UE 2024/1689` — transparência e zero alucinações), RGPD (`Reg. UE 2016/679` — mascaramento de logs via `maskEmailRgpd`/`maskPhoneRgpd` + HMAC-SHA256), Diretiva Omnibus (`Reg. UE 2019/2161` — validação de histórico de preço a 90 dias em `amazonRadarService.js` e `appleRadarService.js`), EFSA/ISSN (`160g` proteína, `2.5L` água, `5g` creatina), `Reg. (CE) n.º 561/2006` e `Reg. (UE) n.º 165/2014` (`4h30`, pausa `45m` ou `15m+30m`, `9h/10h`, `56h/90h` no serviço de frotas).
+   - **República Portuguesa:** Código da Estrada (`DL 114/94`), `DL n.º 169/2009`, `Lei n.º 27/2010`, `Regulamento CMVM n.º 2/2015` + RGEU + Simplex Urbanístico (`DL n.º 10/2024`, desvalorização `-25%` sem licença), Direito do Consumo (`DL n.º 84/2021` — garantia legal de **3 anos** Apple/tech novo e auditoria de bateria/peças em Grau A `>=85%`), ERC/DRE/DGEG/IPMA.
+   - **Município de Amarante & CIM Tâmega e Sousa:** PDM de Amarante & RMUE (`1.350 / 1.180 / 1.120 €/m²`; terreno `35 / 8 / 2 €/m²`), `cm-amarante.pt`, Proteção Civil e eixos `A4/Marão`, `EN15`, `EN210`.
 
 ---
 
@@ -141,7 +150,7 @@ Whitelist estrita (`TRUSTED_SOURCES` verificada via `isTrustedSource(url)`):
 - **Utilidade Pública:** `/combustiveis [concelho]`, `/gasoleo`, `/gasolina` (API DGEG), `/farmacias [concelho]`, `/transito`, `/pesquisa <termo>`.
 - **Família & Lembretes DST-safe:** `/compras`, `/tarefas`, `/carolina`, `/notas`, `/lembrete`.
 - **IPTV & Streaming:** `/tv [canal]`, `/canal`, `/portugal.m3u`.
-- **DevOps 100% Cloud ([`worker_dev.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/workers/worker_dev.js)):** `/status_cloud`, `/compilar <repo> [workflow] [branch]` (GitHub Actions `workflow_dispatch`), `/projetos`, `/criar_app` (+ webhook Vercel), `/apps`, `/apks`.
+- **DevOps 100% Cloud ([`cloudDevService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/cloudDevService.js) + [`worker_dev.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/workers/worker_dev.js)):** `/status_cloud`, `/compilar <repo> [workflow] [branch]` (GitHub Actions `workflow_dispatch` + notificação de conclusão), `/projetos`, `/criar_app` (+ webhook Vercel), `/apps` (API live Vercel), `/apks`.
 - **Administração & Drive:** `/autorizados`, `/autorizar`, `/bloquear`, `/drive`, `/diagnostico`, `/status`.
 
 ---
@@ -174,7 +183,8 @@ Whitelist estrita (`TRUSTED_SOURCES` verificada via `isTrustedSource(url)`):
 Localizado em [`c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot) (`@zeropaperfrotaBot`, declarado como serviço autónomo no [`render.yaml`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/render.yaml)):
 - Endpoint dedicado **`POST /webhook/frota`** autenticado por **`TELEGRAM_FROTAS_TOKEN`** (com fallback `TELEGRAM_BOT_TOKEN` local) e `TELEGRAM_WEBHOOK_SECRET` opcional.
 - Persistência operacional isolada no **Supabase** (`AppFrota`), confirmação em 2 passos, idempotência SHA-256 e matriz RBAC por perfil.
-- [`src/services/routeService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot/src/services/routeService.js): implementa `/rota` (OpenRouteService `driving-hgv`, sem distâncias inventadas se `ORS_API_KEY` falhar) e `/tacografo` (Regulamento CE n.º 561/2006).
+- [`src/services/routeService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot/src/services/routeService.js): implementa `/rota` (OpenRouteService `driving-hgv`, sem distâncias inventadas se `ORS_API_KEY` falhar) e `/tacografo` (Reg. CE n.º 561/2006, Reg. UE n.º 165/2014, DL 114/94, DL 169/2009, Lei 27/2010 — limites 4h30 / 45m ou 15m+30m / 9h-10h / 56h semanal / 90h quinzenal).
+- [`src/services/fleetProactiveService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot/src/services/fleetProactiveService.js): proatividade em turno — avisos preventivos 30 min e 15 min antes das 4h30 de condução contínua (`evaluateDrivingLimitAlert`), alerta matinal `07:30` de anomalias abertas em Supabase (`buildShiftStartAnomalyAlert`) e lembrete de fecho de turno KM/higiene `19:30` (`buildShiftEndReminder`).
 
 ---
 

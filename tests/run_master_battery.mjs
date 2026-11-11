@@ -15,13 +15,16 @@ process.env.NODE_ENV = 'test';
 const { sqliteMasterDb, triggerCloudSyncDebounced: dbSyncHook } = await import('../src/shared/sqliteMasterDb.js');
 const { getDriveSyncStatus, initCloudPersistence, triggerCloudSyncDebounced } = await import('../src/services/googleDriveService.js');
 const { conversationMemory } = await import('../src/shared/conversationMemory.js');
-const { isAuthorized, authorizeContact, AUTHORIZED_PHONES } = await import('../src/shared/security.js');
+const { isAuthorized, authorizeContact, AUTHORIZED_PHONES, maskEmailRgpd, maskPhoneRgpd } = await import('../src/shared/security.js');
 const { VERCEL_APPS } = await import('../src/shared/appsCatalog.js');
 const { detectIntent, routeMessage, FLEET_REDIRECT_MSG } = await import('../src/router/masterRouter.js');
-const { SYSTEM_PROMPTS } = await import('../src/services/reasoningService.js');
-const { TRUSTED_SOURCES, isTrustedSource } = await import('../src/services/newsService.js');
+const { SYSTEM_PROMPTS, loadAgentsMdDirectives, CONFORMANCE_MATRIX } = await import('../src/services/reasoningService.js');
+const { TRUSTED_SOURCES, isTrustedSource, fetchIpmaPortoWeather } = await import('../src/services/newsService.js');
 const { avaliarImovelCmvm } = await import('../src/services/immoCmvmService.js');
 const { evaluateAppleComparison } = await import('../src/services/appleRadarService.js');
+const { validateOmnibus90DayDeal } = await import('../src/services/amazonRadarService.js');
+const proactiveEngine = await import('../src/services/proactiveEngine.js');
+const cloudDevService = await import('../src/services/cloudDevService.js');
 const workerNutricao = await import('../src/workers/worker_nutricao.js');
 const workerImmo = await import('../src/workers/worker_immo.js');
 const workerDev = await import('../src/workers/worker_dev.js');
@@ -481,6 +484,146 @@ async function main() {
       assert(amOut.includes('Alerta de Vigilância Ativado') && amOut.toLowerCase().includes('amazon'), '/vigiar_amazon deve criar filtro amazon');
       const apOut = await workerImmo.handle('/vigiar_apple MacBook Air M3 1100', ctx);
       assert(apOut.includes('Alerta de Vigilância Ativado') && apOut.toLowerCase().includes('apple'), '/vigiar_apple deve criar filtro apple');
+    });
+
+    // ─── MÓDULO 8: Conformidade Normativa Tripla, Proatividade & IPMA ─────────
+    console.log('\n🛡️  MÓDULO 8: Conformidade Tripla, Proatividade & IPMA/Cloud');
+
+    await runTest('PROACT-01', 'Janela de silêncio 22:30-07:30, Briefing Matinal, Nutrição <70% e Lembretes críticos', async () => {
+      assert(proactiveEngine.isQuietHours(new Date('2026-01-15T22:35:00Z')) === true, '22:35 Lisboa deve estar em silêncio');
+      assert(proactiveEngine.isQuietHours(new Date('2026-01-15T07:15:00Z')) === true, '07:15 Lisboa deve estar em silêncio');
+      assert(proactiveEngine.isQuietHours(new Date('2026-01-15T07:30:00Z')) === false, '07:30 Lisboa já não deve estar em silêncio');
+      assert(proactiveEngine.isQuietHours(new Date('2026-01-15T22:29:00Z')) === false, '22:29 Lisboa já está ativa');
+
+      const morning = await proactiveEngine.buildMorningExecutiveBriefing({
+        getNewsFn: async () => '🗞️ NOTÍCIAS IPMA + AMARANTE OK',
+        getFuelFn: async (_mun, tipo) => ({ tipo, postos: [{ nome: 'Posto Teste' }] }),
+        formatFuelFn: (d) => `⛽ ${d.tipo}: 1.499 €/L`,
+        getEmailStatusFn: () => ({ configured: true }),
+        getEmailBriefingFn: async () => '📧 1 email importante',
+        getTasksFn: () => [{ title: 'Comprar leite bebé', assigned_to: 'André', completed: false }]
+      });
+      assert(
+        morning.includes('NOTÍCIAS IPMA + AMARANTE OK') &&
+          morning.includes('gasoleo') &&
+          morning.includes('1 email importante') &&
+          morning.includes('Comprar leite bebé'),
+        'Briefing Matinal deve consolidar notícias, combustíveis, emails e tarefas'
+      );
+
+      let recipeCalled = false;
+      const alert20h = await proactiveEngine.evaluateNutritionProactiveCheck({
+        nutritionData: { totalProtein: 80, proteinTarget: 160, totalWater: 1500, waterTarget: 2500, tookCreatina: false },
+        hour: 20,
+        generateRecipeFn: async () => {
+          recipeCalled = true;
+          return '👨‍🍳 Pescada MCC com ervas aromáticas diretas (sem refogado)';
+        }
+      });
+      assert(recipeCalled && alert20h && alert20h.includes('80g / 160g') && alert20h.includes('EFSA/ISSN'), 'Às 20h com <70% proteína deve sugerir receita rápida');
+
+      const ok20h = await proactiveEngine.evaluateNutritionProactiveCheck({
+        nutritionData: { totalProtein: 160, proteinTarget: 160, totalWater: 2500, waterTarget: 2500, tookCreatina: true },
+        hour: 20
+      });
+      assert(ok20h === null, 'Meta totalmente cumprida às 20h deve devolver null');
+
+      const check13h = await proactiveEngine.evaluateNutritionProactiveCheck({
+        nutritionData: { totalProtein: 20, proteinTarget: 160, totalWater: 500, waterTarget: 2500, tookCreatina: false },
+        hour: 13
+      });
+      assert(check13h && check13h.includes('13h00'), 'Check-in às 13h deve alertar progresso matinal');
+
+      const pastIso = new Date(Date.now() - 60000).toISOString();
+      const rem = sqliteMasterDb.addReminder({ text: 'Dar vitamina Carolina', triggerAt: pastIso, chatId: '950415577', user: { id: 950415577, first_name: 'André' } });
+      const sentMsgs = [];
+      const mockBot = { telegram: { sendMessage: async (chatId, text) => { sentMsgs.push({ chatId, text }); } } };
+      const dispatched = await proactiveEngine.dispatchDueReminders(mockBot, '950415577');
+      assert(dispatched >= 1 && sentMsgs.some((m) => m.text.includes('Dar vitamina Carolina')), 'Lembrete devido deve disparar sempre');
+      const remainingDue = sqliteMasterDb.getPendingDueReminders().filter((r) => r.id === rem.id);
+      assert(remainingDue.length === 0, 'Lembrete despachado deve ser marcado como enviado');
+    });
+
+    await runTest('COMPLY-01', 'Conformidade Tripla (AGENTS, RGPD logs, Omnibus 90d, DL 84/2021, MCC sem refogado)', async () => {
+      assert(loadAgentsMdDirectives() === true, 'AGENTS.md canónico deve carregar com sucesso');
+      for (const req of ['2024/1689', '2016/679', '2019/2161', 'EFSA/ISSN', 'DL n.º 10/2024', 'DL n.º 84/2021', 'PDM de Amarante']) {
+        assert(CONFORMANCE_MATRIX.includes(req), `CONFORMANCE_MATRIX deve citar ${req}`);
+      }
+
+      const maskedMail = maskEmailRgpd('andre@example.com');
+      const maskedPhone = maskPhoneRgpd('351919115655');
+      assert(!maskedMail.includes('andre@') && maskedMail.includes('@example.com'), 'RGPD deve mascarar prefixo de email');
+      assert(!maskedPhone.includes('919115') && maskedPhone.endsWith('655'), 'RGPD deve mascarar dígitos iniciais de telemóvel');
+
+      const recent = new Date(Date.now() - 10 * 86400 * 1000).toISOString();
+      const realDeal = validateOmnibus90DayDeal({ preco: 80, asin: 'B001' }, [{ preco: 110, asin: 'B001', data_atualizacao: recent }]);
+      assert(realDeal.status === 'true_min_90d' && realDeal.min90d === 80, 'Omnibus deve confirmar mínimo real de 90 dias');
+      const fakeDeal = validateOmnibus90DayDeal({ preco: 120, asin: 'B001' }, [{ preco: 110, asin: 'B001', data_atualizacao: recent }]);
+      assert(fakeDeal.status === 'not_lowest_90d' && fakeDeal.min90d === 110, 'Omnibus deve detetar preço acima do mínimo de 90 dias');
+
+      const appleNear = evaluateAppleComparison(1000, 950);
+      assert(appleNear.recomenda.includes('DL 84/2021'), 'Comparador Apple deve referenciar garantia 3 anos DL 84/2021');
+      const appleMid = evaluateAppleComparison(1000, 860);
+      assert(appleMid.recomenda.includes('DL 84/2021') && appleMid.recomenda.includes('>=85%'), 'Comparador Apple equilibrado deve exigir bateria >=85%');
+
+      const savedEnv = { GEMINI_API_KEY: process.env.GEMINI_API_KEY, GROQ_API_KEY: process.env.GROQ_API_KEY, OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY };
+      const origFetch = globalThis.fetch;
+      delete process.env.GEMINI_API_KEY;
+      delete process.env.GROQ_API_KEY;
+      delete process.env.OPENROUTER_API_KEY;
+      globalThis.fetch = async () => ({ ok: false, status: 503, text: async () => '' });
+      try {
+        const mccRec = await workerNutricao.generateHealthyRecipe({ query: 'Pescada com curgete', mode: 'mcc' });
+        assert(mccRec.includes('sem refogado') && !mccRec.includes('*Refogar*'), 'Modo MCC deve eliminar refogados e usar ervas aromáticas diretas');
+      } finally {
+        globalThis.fetch = origFetch;
+        if (savedEnv.GEMINI_API_KEY !== undefined) process.env.GEMINI_API_KEY = savedEnv.GEMINI_API_KEY;
+        if (savedEnv.GROQ_API_KEY !== undefined) process.env.GROQ_API_KEY = savedEnv.GROQ_API_KEY;
+        if (savedEnv.OPENROUTER_API_KEY !== undefined) process.env.OPENROUTER_API_KEY = savedEnv.OPENROUTER_API_KEY;
+      }
+    });
+
+    await runTest('IPMA-01', 'fetchIpmaPortoWeather lê IPMA real e não alucina em falha HTTP', async () => {
+      const origFetch = globalThis.fetch;
+      try {
+        globalThis.fetch = async (url) => {
+          if (String(url).includes('1131200.json')) {
+            return {
+              ok: true,
+              json: async () => ({ data: [{ forecastDate: '2026-11-12', tMin: '8', tMax: '17', precipitaProb: '20', predWindDir: 'NW' }] })
+            };
+          }
+          return {
+            ok: true,
+            json: async () => [{ idAreaAviso: 'PTO', awarenessLevelID: 'yellow', awarenessTypeName: 'Precipitação', text: 'Chuva forte pontual' }]
+          };
+        };
+        const okRes = await fetchIpmaPortoWeather();
+        assert(okRes.forecast.tMin === '8' && okRes.forecast.tMax === '17' && okRes.warnings.length === 1, 'IPMA deve extrair forecast e aviso PTO');
+
+        globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => ({}) });
+        const errRes = await fetchIpmaPortoWeather();
+        assert(errRes.forecast === null && errRes.warnings.length === 0, 'Em falha IPMA nunca pode inventar valores meteorológicos');
+      } finally {
+        globalThis.fetch = origFetch;
+      }
+    });
+
+    await runTest('CLOUD-01', 'cloudDevService lista repositórios, cria repo e consulta catálogo Vercel', async () => {
+      const mockOctokit = {
+        rest: {
+          repos: {
+            listForAuthenticatedUser: async () => ({ data: [{ name: 'telegram-master-bot', html_url: 'https://github.com/u/r', description: 'Bot' }] }),
+            createForAuthenticatedUser: async ({ name }) => ({ data: { name, html_url: `https://github.com/u/${name}` } })
+          }
+        }
+      };
+      const reposOut = await cloudDevService.listGithubRepos({ octokitClient: mockOctokit });
+      assert(reposOut.includes('telegram-master-bot'), 'listGithubRepos deve listar repositórios reais');
+      const createdOut = await cloudDevService.createCloudRepoAndDeploy('nova-app Teste Cloud', { octokitClient: mockOctokit });
+      assert(createdOut.includes('nova-app') && createdOut.includes('Nuvem'), 'createCloudRepoAndDeploy deve confirmar criação Cloud');
+      const vercelApps = await cloudDevService.listVercelAppsOrDeployments();
+      assert(vercelApps.includes('gestao-familiar-webapp.vercel.app'), 'listVercelAppsOrDeployments deve listar catálogo Vercel');
     });
   } finally {
     sqliteMasterDb.close();

@@ -190,26 +190,25 @@ function buildDeterministicFallbackRecipe(query, mode) {
     return (
       `🤖 *RECEITA MONSIEUR CUISINE CONNECT: ${titulo}*\n\n` +
       `⏱️ *1. Tempo & Doses:*\n` +
-      `• Tempo Total: 25 minutos (robô de cozinha Monsieur Cuisine Connect)\n` +
+      `• Tempo Total: 22 minutos (robô Monsieur Cuisine Connect — confeção direta sem refogado)\n` +
       `• Rendimento: 2 doses\n\n` +
       `⚖️ *2. Ingredientes (Quantidades Exatas):*\n` +
-      `• 400g Peito de peru ou frango em tiras (adaptado a: ${titulo})\n` +
-      `• 150g Cebola em quartos + 2 dentes de alho\n` +
-      `• 250g Tomate pelado triturado + 200g Courgette/Cenoura\n` +
-      `• 10ml Azeite virgem extra + 150ml Caldo caseiro\n` +
-      `• Especiarias: salsa, orégãos e pitada de sal\n\n` +
+      `• 400g Peito de frango ou peru em cubos (adaptado a: ${titulo})\n` +
+      `• 250g Tomate pelado triturado + 250g Courgette/Brócolos em pedaços\n` +
+      `• 150ml Caldo caseiro ou água + 10ml Azeite virgem extra adicionado a cru no final\n` +
+      `• Ervas aromáticas diretas: orégãos, tomilho, salsa fresca, alho em pó e pitada de sal\n\n` +
       `👨‍🍳 *3. Preparação Passo a Passo (Monsieur Cuisine Connect):*\n` +
-      `1. Coloca cebola e alho no copo: *Picar 5 seg / Velocidade 5*. Baixa com a espátula.\n` +
-      `2. Junta 10ml de azeite: *Refogar (Sear/Reverse) 4 min / 120°C / Velocidade 1* sem copo medidor.\n` +
-      `3. Adiciona o frango/peru, legumes, tomate e caldo: *Cozinhar 18 min / 100°C / Velocidade 1 / Rotação Inversa (Reverse)*.\n` +
-      `4. Verifica consistência; serve quente (ou tritura molho separado 15 seg / Vel 6 se preferires creme).\n\n` +
-      `📊 *4. Informação Nutricional (por dose — 1/2):*\n` +
+      `1. Coloca os legumes e ervas aromáticas no copo: *Picar 5 seg / Velocidade 5*.\n` +
+      `2. Junta diretamente o frango/peru, tomate triturado e 150ml de caldo (sem refogado): *Cozinhar 18 min / 100°C / Velocidade 1 / Rotação Inversa (Reverse)*.\n` +
+      `3. Retifica ervas aromáticas e envolve os 10ml de azeite em cru no último minuto (*30 seg / Vel 1 / Reverse*).\n` +
+      `4. Serve de imediato bem quente.\n\n` +
+      `📊 *4. Informação Nutricional (por dose — 1/2 | Ref. EFSA/ISSN):*\n` +
       `| Macro | Valor por Dose | Meta Diária |\n` +
       `|---|---|---|\n` +
-      `| Calorias | ~395 kcal | — |\n` +
+      `| Calorias | ~375 kcal | — |\n` +
       `| Proteína | ${protPorDose}g | ${pctMeta}% da meta diária de ${DAILY_PROTEIN_TARGET}g |\n` +
-      `| Hidratos de Carbono | 22g | — |\n` +
-      `| Gorduras | 8g | — |\n\n` +
+      `| Hidratos de Carbono | 18g | — |\n` +
+      `| Gorduras | 7g | — |\n\n` +
       `💡 _Para registar esta dose:_ \`/proteina ${protPorDose} : ${titulo} (MCC)\``
     );
   }
