@@ -13,11 +13,18 @@ process.env.NODE_ENV = 'test';
 
 // Imports dinâmicos após configurar MASTER_DB_PATH
 const { sqliteMasterDb, triggerCloudSyncDebounced: dbSyncHook } = await import('../src/shared/sqliteMasterDb.js');
-const { getDriveSyncStatus, initCloudPersistence, triggerCloudSyncDebounced } = await import('../src/services/googleDriveService.js');
+const { getDriveSyncStatus, getServiceAccountCredentials, isDriveConfigured, initCloudPersistence, triggerCloudSyncDebounced } = await import('../src/services/googleDriveService.js');
 const { conversationMemory } = await import('../src/shared/conversationMemory.js');
 const { isAuthorized, authorizeContact, AUTHORIZED_PHONES, maskEmailRgpd, maskPhoneRgpd } = await import('../src/shared/security.js');
 const { VERCEL_APPS } = await import('../src/shared/appsCatalog.js');
 const { detectIntent, routeMessage, FLEET_REDIRECT_MSG } = await import('../src/router/masterRouter.js');
+const {
+  LEGACY_WEBHOOK_KEYS,
+  LEGACY_FLEET_ACTIONS,
+  getLegacyBridgeConfigs,
+  registerMasterBackCompatHandlers,
+  createLegacyBridgeBots
+} = await import('../src/bot/legacyBridges.js');
 const { SYSTEM_PROMPTS, loadAgentsMdDirectives, CONFORMANCE_MATRIX } = await import('../src/services/reasoningService.js');
 const { TRUSTED_SOURCES, isTrustedSource, fetchIpmaPortoWeather } = await import('../src/services/newsService.js');
 const { avaliarImovelCmvm } = await import('../src/services/immoCmvmService.js');
@@ -624,6 +631,104 @@ async function main() {
       assert(createdOut.includes('nova-app') && createdOut.includes('Nuvem'), 'createCloudRepoAndDeploy deve confirmar criação Cloud');
       const vercelApps = await cloudDevService.listVercelAppsOrDeployments();
       assert(vercelApps.includes('gestao-familiar-webapp.vercel.app'), 'listVercelAppsOrDeployments deve listar catálogo Vercel');
+    });
+
+    await runTest('UPG-01', 'Aliasing legacy (/europa, /status_nuvem) e leitura dinâmica Drive env após import', () => {
+      assert(detectIntent('/europa') === 'GERAL', '/europa deve encaminhar para worker GERAL (notícias)');
+      assert(detectIntent('/status_nuvem') === 'DEV', '/status_nuvem deve encaminhar para worker DEV');
+
+      const prevKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+      try {
+        process.env.GOOGLE_SERVICE_ACCOUNT_KEY = JSON.stringify({
+          client_email: 'dynamic-test@example.iam.gserviceaccount.com',
+          private_key: '-----BEGIN PRIVATE KEY-----\nTEST\n-----END PRIVATE KEY-----\n'
+        });
+        const sa = getServiceAccountCredentials();
+        assert(sa?.client_email === 'dynamic-test@example.iam.gserviceaccount.com', 'Credenciais Drive devem ser lidas dinamicamente do env');
+        assert(isDriveConfigured() === true, 'isDriveConfigured deve reconhecer GOOGLE_SERVICE_ACCOUNT_KEY dinâmico');
+      } finally {
+        if (prevKey === undefined) delete process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+        else process.env.GOOGLE_SERVICE_ACCOUNT_KEY = prevKey;
+      }
+    });
+
+    await runTest('UPG-02', 'legacyBridges garante compatibilidade dos 5 bots + redirecionamento frota isolado', async () => {
+      assert(LEGACY_WEBHOOK_KEYS.length === 5, 'Deve reconhecer exatamente as 5 chaves de webhook legacy');
+      const cfgs = getLegacyBridgeConfigs({
+        TELEGRAM_DEV_TOKEN: '123456:DEV_TOKEN',
+        TELEGRAM_IMMO_TOKEN: '123456:IMMO_TOKEN',
+        TELEGRAM_PESSOAL_TOKEN: '123456:PESSOAL_TOKEN',
+        TELEGRAM_NUTRICAO_TOKEN: '123456:NUTRI_TOKEN',
+        TELEGRAM_FROTAS_TOKEN: '123456:FROTA_TOKEN'
+      });
+      assert(cfgs.every((c) => Boolean(c.token && c.webhookPath.startsWith('/webhook/'))), 'Todas as pontes DEV/IMMO/PESSOAL/NUTRICAO/FROTAS devem resolver token e webhook');
+
+      const actionMap = new Map();
+      const commandMap = new Map();
+      const mockBot = {
+        action: (id, fn) => actionMap.set(id, fn),
+        command: (cmds, fn) => (Array.isArray(cmds) ? cmds : [cmds]).forEach((c) => commandMap.set(c, fn))
+      };
+
+      const sent = [];
+      registerMasterBackCompatHandlers(mockBot, {
+        sendReply: async (_ctx, text, extra) => sent.push({ text, extra }),
+        handleImmo: async (cmd) => `MOCK_IMMO:${cmd}`,
+        getPlanoNutricional: () => 'MOCK_PLANO',
+        getResumoHoje: () => 'MOCK_HOJE',
+        routeMessage
+      });
+
+      for (const id of ['immo_amarante', 'immo_felgueiras', 'immo_alertas_status', 'nutri_plano', 'nutri_hoje', ...LEGACY_FLEET_ACTIONS]) {
+        assert(actionMap.has(id), `Callback legado em falta no Master: ${id}`);
+      }
+
+      await actionMap.get('immo_amarante')({ answerCbQuery: async () => {}, sendChatAction: async () => {} });
+      assert(sent.at(-1).text === 'MOCK_IMMO:/avaliacao 120 Amarante T3 bom', 'immo_amarante deve invocar avaliação Amarante');
+
+      await actionMap.get('frota_porto_lisboa')({ answerCbQuery: async () => {} });
+      assert(sent.at(-1).text === FLEET_REDIRECT_MSG, 'frota_porto_lisboa no Master deve redirecionar com FLEET_REDIRECT_MSG');
+      assert(JSON.stringify(sent.at(-1).extra).includes('zeropaperfrotaBot'), 'Botão inline deve apontar para @zeropaperfrotaBot');
+
+      const noop = async () => {};
+      const bridges = createLegacyBridgeBots(
+        {
+          authMiddleware: async (_ctx, next) => next(),
+          cleanChatMiddleware: async (_ctx, next) => next(),
+          sendReply: noop,
+          safeExecute: async (fn) => fn(),
+          withTypingHeartbeat: async (_ctx, fn) => fn(),
+          processPhotoWithVision: noop,
+          transcribeTelegramAudio: async () => null,
+          routeMessage,
+          handleDev: async () => 'DEV_OK',
+          handleImmo: async () => 'IMMO_OK',
+          handleGeral: async () => 'GERAL_OK',
+          handleNutricao: async () => 'NUTRI_OK',
+          handleStatusCloud: async () => 'CLOUD_OK',
+          getPlanoNutricional: () => 'PLANO_OK',
+          getResumoHoje: () => 'HOJE_OK',
+          handleAguaInput: () => 'AGUA_OK',
+          handleCreatina: () => 'CREATINA_OK',
+          handleProteinaInput: () => 'PROT_OK'
+        },
+        {
+          TELEGRAM_DEV_TOKEN: '123456:DEV_TEST',
+          TELEGRAM_FROTAS_TOKEN: '123456:FROTAS_TEST'
+        }
+      );
+      assert(bridges.length === 2, 'Deve instanciar apenas pontes com token presente no ambiente');
+      assert(bridges.some((b) => b.webhookPath === '/webhook/dev') && bridges.some((b) => b.webhookPath === '/webhook/frotas'), 'Deve mapear /webhook/dev e /webhook/frotas');
+    });
+
+    await runTest('UPG-03', 'index.js expõe pontes legacy, aliases (/europa, /status_nuvem) e newsService sem feeds 404', () => {
+      const indexSrc = fs.readFileSync(path.join(ROOT_DIR, 'index.js'), 'utf-8');
+      assert(indexSrc.includes('europa') && indexSrc.includes('status_nuvem'), 'index.js deve suportar aliases legados /europa e /status_nuvem');
+      assert(indexSrc.includes('LEGACY_WEBHOOK_KEYS') && indexSrc.includes('createLegacyBridgeBots'), 'index.js deve montar pontes webhook legacy');
+
+      const newsSrc = fs.readFileSync(path.join(ROOT_DIR, 'src/services/newsService.js'), 'utf-8');
+      assert(!newsSrc.includes('averdade.com/feed/'), 'newsService.js não pode consultar feed 404 de averdade.com/feed/');
+      assert(newsSrc.includes('cm-amarante.pt/feed/'), 'newsService.js deve usar RSS oficial vivo cm-amarante.pt/feed/');
     });
   } finally {
     sqliteMasterDb.close();

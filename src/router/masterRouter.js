@@ -34,11 +34,11 @@ const PATTERNS = {
     /\b(moradia|apartamento|im[oó]vel|imobili[aá]ri|idealista|imovirtual|cmvm|standvirtual|piscapisca|carmine|pcdiga|globaldata|pccomponentes|wallapop|amazon\.es|segunda\s+mano|iphone|macbook|recondicionad|grau\s+a|iservices|swappie|back\s*market)\b/i
   ],
   DEV: [
-    /^\/(code|projetos?|criar_app|deploy|apps?|apks?|status_cloud|print|screenshot|pc|pc_status|hardware|pc_sistema|compilar|build)\b/i,
-    /\b(c[oó]digo|bug|erro|node\.?js|react|github(?:\s+actions)?|vercel|render|cloud\s*status|telemetria\s+cloud|webhook|pc\s*surface|screenshot|ecr[aã]|compilar\s+apk)\b/i
+    /^\/(code|projetos?|criar_app|deploy|apps?|apks?|status_cloud|status_nuvem|print|screenshot|pc|pc_status|hardware|pc_sistema|compilar|build)\b/i,
+    /\b(c[oó]digo|bug|erro|node\.?js|react|github(?:\s+actions)?|vercel|render|cloud\s*status|status\s+da\s+nuvem|telemetria\s+cloud|webhook|pc\s*surface|screenshot|ecr[aã]|compilar\s+apk)\b/i
   ],
   GERAL: [
-    /^\/(noticias|noticias_regiao|amarante|governo|leis|farmacias?|compras?|tarefas?|carolina|nota|notas|lembrete|lembretes|briefing|resumo|emails?|ler_email|resumo_email|email_status|pesquisa|google|combustiveis|gasoleo|gasolina|transito|tv|programacao)\b/i,
+    /^\/(noticias|noticia|news|europa|noticias_regiao|amarante|governo|leis|farmacias?|compras?|tarefas?|carolina|nota|notas|lembrete|lembretes|briefing|resumo|emails?|ler_email|resumo_email|email_status|pesquisa|google|combustiveis|gasoleo|gasolina|transito|tv|programacao)\b/i,
     /\b(not[ií]cias?|di[aá]rio\s+da\s+rep[uú]blica|portugal\.gov|ipma|prociv|farm[aá]cias?|email|inbox|correio|compras|supermercado|tarefa|carolina|escola|lembra-me|lembrar|daqui a \d+|amanh[aã]\s+[aà]s|nota:|combust[ií]veis|gas[oó]leo|tr[aâ]nsito)\b/i
   ]
 };

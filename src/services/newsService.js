@@ -27,7 +27,7 @@ const RSS_FEEDS = {
   pais: { url: 'https://www.rtp.pt/noticias/rss/pais', label: 'RTP Notícias (País / Lusa)', badge: 'Imprensa ERC' },
   economia: { url: 'https://www.rtp.pt/noticias/rss/economia', label: 'RTP Economia', badge: 'Imprensa ERC' },
   comissao_ue: { url: 'https://ec.europa.eu/commission/presscorner/api/rss?language=pt', label: 'Comissão Europeia', badge: 'Fonte Oficial UE' },
-  averdade: { url: 'https://www.averdade.com/feed/', label: 'Jornal A Verdade (Amarante)', badge: 'Imprensa ERC' },
+  cm_amarante: { url: 'https://www.cm-amarante.pt/feed/', label: 'CM Amarante', badge: 'Fonte Oficial Local' },
   tamegasousa: { url: 'https://www.tamegasousa.pt/feed/', label: 'TâmegaSousa.pt', badge: 'Imprensa Regional' },
   expressodeamarante: { url: 'https://www.expressodeamarante.pt/feed/', label: 'Expresso de Amarante', badge: 'Imprensa Regional' }
 };
@@ -54,6 +54,8 @@ function cleanText(str = '') {
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
     .replace(/<[^>]+>/g, '')
     .replace(/&amp;/g, '&')
+    .replace(/&#0*38;/g, '&')
+    .replace(/&#(\d+);/g, (_m, dec) => String.fromCharCode(Number(dec)))
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ')
@@ -166,11 +168,12 @@ export async function getRegionalNews(forceRefresh = false) {
     return cacheStore.regional.text;
   }
 
-  const [averdade, tamega, expresso, cmAmaranteWeb, jnAmaranteWeb] = await Promise.all([
-    fetchRssSafe(RSS_FEEDS.averdade, 2),
+  const [cmAmaranteRss, tamega, expresso, cmAmaranteWeb, averdadeWeb, jnAmaranteWeb] = await Promise.all([
+    fetchRssSafe(RSS_FEEDS.cm_amarante, 2),
     fetchRssSafe(RSS_FEEDS.tamegasousa, 2),
     fetchRssSafe(RSS_FEEDS.expressodeamarante, 2),
-    fetchTrustedWebItems('site:cm-amarante.pt OR site:cimtamegaesousa.pt avisos noticias amarante', 3),
+    fetchTrustedWebItems('site:cm-amarante.pt OR site:cimtamegaesousa.pt avisos noticias amarante', 2),
+    fetchTrustedWebItems('site:averdade.com amarante', 2),
     fetchTrustedWebItems('site:jn.pt Amarante noticias', 2)
   ]);
 
@@ -179,11 +182,11 @@ export async function getRegionalNews(forceRefresh = false) {
   msg += `🕒 _Atualizado (Europe/Lisbon): ${ts}_\n\n`;
 
   msg += `🏛️ *Câmara Municipal de Amarante & CIM Tâmega e Sousa:*\n`;
-  msg += renderItemLines(cmAmaranteWeb, 'https://www.cm-amarante.pt');
+  msg += renderItemLines([...cmAmaranteRss, ...cmAmaranteWeb].slice(0, 4), 'https://www.cm-amarante.pt');
   msg += '\n';
 
   msg += `🗞️ *Imprensa Regional Credenciada (ERC):*\n`;
-  const imprensa = [...averdade, ...tamega, ...expresso, ...jnAmaranteWeb].slice(0, 6);
+  const imprensa = [...averdadeWeb, ...tamega, ...expresso, ...jnAmaranteWeb].slice(0, 6);
   msg += renderItemLines(imprensa, 'https://www.averdade.com');
 
   msg += `\n🛡️ _Whitelist estrita: CM Amarante, CIM Tâmega e Sousa, A Verdade, TâmegaSousa, Expresso de Amarante e JN._`;
@@ -303,16 +306,16 @@ export async function getDailyNewsBriefing(forceRefresh = false) {
     return cacheStore.briefing.text;
   }
 
-  const [pais, economia, amaranteRss, amaranteCm, governo, alertas, ipmaLive] = await Promise.all([
+  const [pais, economia, amaranteRss, amaranteWeb, governo, alertas, ipmaLive] = await Promise.all([
     fetchRssSafe(RSS_FEEDS.pais, 3),
     fetchRssSafe(RSS_FEEDS.economia, 2),
-    fetchRssSafe(RSS_FEEDS.averdade, 2),
-    fetchTrustedWebItems('site:cm-amarante.pt OR "CIM Tâmega e Sousa" OR "A4" "Marão" OR "EN15" amarante', 2),
+    fetchRssSafe(RSS_FEEDS.cm_amarante, 2),
+    fetchTrustedWebItems('site:cm-amarante.pt OR site:averdade.com OR "CIM Tâmega e Sousa" OR "A4" "Marão" amarante', 2),
     fetchTrustedWebItems('site:portugal.gov.pt OR site:diariodarepublica.pt comunicados noticias', 2),
     fetchTrustedWebItems('site:ipma.pt OR site:prociv.gov.pt OR site:cm-amarante.pt avisos meteorologicos amarante norte', 2),
     fetchIpmaPortoWeather()
   ]);
-  const amarante = [...amaranteRss, ...amaranteCm].slice(0, 3);
+  const amarante = [...amaranteRss, ...amaranteWeb].slice(0, 3);
 
   const ts = formatDatePt(new Date());
   let msg = `🗞️ *BRIEFING OFICIAL CERTIFICADO*\n`;

@@ -10,9 +10,7 @@ const log = createLogger('GoogleDrive');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '../../');
 
-// Configurações lidas do .env
-const GOOGLE_SA_KEY_RAW = process.env.GOOGLE_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_CREDENTIALS_JSON;
-const GOOGLE_SA_PATH = process.env.GOOGLE_SERVICE_ACCOUNT_PATH;
+// Configurações padrão (tokens e caminhos são resolvidos dinamicamente em runtime)
 export const DEFAULT_DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '19QWucMs263vBHjswpoeG79TKlha603Cj';
 
 // Cache do token em memória
@@ -20,12 +18,13 @@ let cachedToken = null;
 let tokenExpiresAt = 0;
 
 /**
- * Carrega a chave de conta de serviço (Service Account) se disponível.
+ * Carrega a chave de conta de serviço (Service Account) dinamicamente do env ou disco.
  */
 export function getServiceAccountCredentials() {
-  if (GOOGLE_SA_KEY_RAW) {
+  const rawKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_CREDENTIALS_JSON;
+  if (rawKey) {
     try {
-      const trimmed = GOOGLE_SA_KEY_RAW.trim();
+      const trimmed = rawKey.trim();
       const jsonStr = trimmed.startsWith('{')
         ? trimmed
         : Buffer.from(trimmed, 'base64').toString('utf-8');
@@ -35,9 +34,10 @@ export function getServiceAccountCredentials() {
     }
   }
 
-  if (GOOGLE_SA_PATH && existsSync(GOOGLE_SA_PATH)) {
+  const envPath = process.env.GOOGLE_SERVICE_ACCOUNT_PATH;
+  if (envPath && existsSync(envPath)) {
     try {
-      return JSON.parse(readFileSync(GOOGLE_SA_PATH, 'utf-8'));
+      return JSON.parse(readFileSync(envPath, 'utf-8'));
     } catch (e) {
       log.error('Erro ao ler GOOGLE_SERVICE_ACCOUNT_PATH:', e.message);
     }

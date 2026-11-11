@@ -6,7 +6,7 @@ import path from 'path';
 import { Telegraf, Markup } from 'telegraf';
 import { createLogger } from './src/utils/logger.js';
 import { sqliteMasterDb } from './src/shared/sqliteMasterDb.js';
-import { routeMessage } from './src/router/masterRouter.js';
+import { routeMessage, FLEET_REDIRECT_MSG } from './src/router/masterRouter.js';
 import { handle as handleGeral } from './src/workers/worker_geral.js';
 import { handle as handleImmo } from './src/workers/worker_immo.js';
 import { handle as handleDev, handleStatusCloud } from './src/workers/worker_dev.js';
@@ -39,6 +39,12 @@ import { dispararCicloRadarComAlertas, gerarRelatorioMultiFrenteMarkdown } from 
 import { formatarSitesImobiliariosMarkdown, buildImmoSitesKeyboard } from './src/shared/immoSitesCatalog.js';
 import { getDailyNewsBriefing, getRegionalNews, getGovNews } from './src/services/newsService.js';
 import { startProactiveEngine, stopProactiveEngine } from './src/services/proactiveEngine.js';
+import {
+  LEGACY_WEBHOOK_KEYS,
+  buildFleetRedirectKeyboard,
+  registerMasterBackCompatHandlers,
+  createLegacyBridgeBots
+} from './src/bot/legacyBridges.js';
 
 const log = createLogger('Master');
 
@@ -250,7 +256,7 @@ bot.command('ajuda', async (ctx) => {
 
 // ─── Comandos Diretos (Notícias, Família, Nutrição, Radar 5 Frentes, Dev, Admin) ─
 
-bot.command(['noticias', 'noticia', 'news'], async (ctx) => {
+bot.command(['noticias', 'noticia', 'news', 'europa'], async (ctx) => {
   await ctx.sendChatAction('typing');
   await sendReply(
     ctx,
@@ -299,9 +305,12 @@ bot.command(['radar', 'pesquisar_imoveis', 'varredura', 'casas', 'moradias_novas
   await sendReply(ctx, await handleImmo(ctx.message.text, ctx));
 });
 
-bot.command(['projetos', 'criar_app', 'compilar', 'build', 'status_cloud', 'cloud', 'diagnostico', 'status', 'pc', 'pc_status', 'print', 'screenshot', 'ecra', 'ecrã'], async (ctx) => {
+bot.command(['projetos', 'criar_app', 'compilar', 'build', 'status_cloud', 'status_nuvem', 'cloud', 'diagnostico', 'status', 'code', 'deploy', 'pc', 'pc_status', 'pc_sistema', 'hardware', 'print', 'screenshot', 'ecra', 'ecrã'], async (ctx) => {
   await ctx.sendChatAction('typing');
-  await sendReply(ctx, await handleDev(ctx.message.text, ctx));
+  const reply = /^\/status_nuvem\b/i.test(ctx.message.text)
+    ? await handleStatusCloud()
+    : await handleDev(ctx.message.text, ctx);
+  await sendReply(ctx, reply);
 });
 
 bot.command(['apps', 'app', 'catalogo', 'vercel'], async (ctx) => {
@@ -313,7 +322,7 @@ bot.command(['apk', 'apks', 'download'], async (ctx) => {
 });
 
 bot.command(['rota', 'tacografo', 'frota', 'frotas'], async (ctx) => {
-  await sendReply(ctx, await routeMessage(ctx.message.text, ctx));
+  await sendReply(ctx, await routeMessage(ctx.message.text, ctx), buildFleetRedirectKeyboard(true));
 });
 
 bot.command(['tv', 'iptv', 'matchpro_tv', 'vlc'], async (ctx) => {
@@ -508,6 +517,14 @@ bot.action('act_main_menu', async (ctx) => {
   await sendReply(ctx, `🎛️ *Grok Bot — Cockpit Pessoal:*`, getMasterKeyboard());
 });
 
+registerMasterBackCompatHandlers(bot, {
+  sendReply,
+  handleImmo,
+  getPlanoNutricional,
+  getResumoHoje,
+  routeMessage
+});
+
 // ─── Mensagens Naturais, Fotos, Voz (Whisper LPU) ───────────────────────────
 
 bot.on('text', async (ctx) => {
@@ -515,7 +532,9 @@ bot.on('text', async (ctx) => {
   if (!text || text.trim().length === 0) return;
   try {
     const resposta = await withTypingHeartbeat(ctx, () => rotear(ctx, text));
-    if (resposta) {
+    if (resposta === FLEET_REDIRECT_MSG) {
+      await sendReply(ctx, resposta, buildFleetRedirectKeyboard(true));
+    } else if (resposta) {
       await sendReply(ctx, resposta);
     }
   } catch (err) {
@@ -536,7 +555,11 @@ const handleMasterVoice = async (ctx) => {
     }
     await ctx.reply(`🎙️ _"${result.text}"_`, { parse_mode: 'Markdown' }).catch(() => {});
     const resposta = await withTypingHeartbeat(ctx, () => rotear(ctx, result.text));
-    if (resposta) await sendReply(ctx, resposta);
+    if (resposta === FLEET_REDIRECT_MSG) {
+      await sendReply(ctx, resposta, buildFleetRedirectKeyboard(true));
+    } else if (resposta) {
+      await sendReply(ctx, resposta);
+    }
   } catch (err) {
     log.error('Erro no áudio:', err.message);
     await ctx.reply('⚠️ Erro ao processar nota de voz.');
@@ -551,9 +574,30 @@ bot.catch((err, ctx) => {
   ctx?.reply('⚠️ Ocorreu um erro. O bot continua operacional.').catch(() => {});
 });
 
-// ─── Servidor HTTP & Webhook Único (/webhook/master) ─────────────────────────
+// ─── Pontes Legacy & Servidor HTTP Webhooks (/webhook/master + bridges) ────────
 
-let masterWebhookCallback = null;
+const legacyBridges = createLegacyBridgeBots({
+  authMiddleware,
+  cleanChatMiddleware,
+  sendReply,
+  safeExecute,
+  withTypingHeartbeat,
+  processPhotoWithVision,
+  transcribeTelegramAudio,
+  routeMessage,
+  handleDev,
+  handleImmo,
+  handleGeral,
+  handleNutricao,
+  handleStatusCloud,
+  getPlanoNutricional,
+  getResumoHoje,
+  handleAguaInput,
+  handleCreatina,
+  handleProteinaInput
+});
+
+const webhookCallbacks = new Map();
 
 const server = http.createServer((req, res) => {
   const urlPath = (req.url || '/').split('?')[0];
@@ -576,6 +620,7 @@ const server = http.createServer((req, res) => {
         service: 'telegram-master-bot',
         bot: '@AndrePinheirobot',
         webhook: '/webhook/master',
+        bridges: legacyBridges.map((b) => ({ key: b.key, bot: b.handle, webhook: b.webhookPath, mode: b.mode })),
         architecture: '100%-cloud-native-personal',
         miniApps: Object.keys(VERCEL_APPS).length,
         sqliteTables: Object.keys(dbStats.tables).length,
@@ -608,8 +653,24 @@ const server = http.createServer((req, res) => {
     }
   }
 
-  if (urlPath === '/webhook/master' && masterWebhookCallback) {
-    return masterWebhookCallback(req, res);
+  const webhookHandler = webhookCallbacks.get(urlPath);
+  if (webhookHandler) {
+    return webhookHandler(req, res);
+  }
+
+  if (urlPath.startsWith('/webhook/')) {
+    const key = urlPath.replace('/webhook/', '').trim();
+    if (LEGACY_WEBHOOK_KEYS.includes(key)) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error: `Ponte legacy [${key}] reconhecida mas token não configurado nesta instância`,
+          webhook: urlPath,
+          masterBot: '@AndrePinheirobot'
+        })
+      );
+      return;
+    }
   }
 
   res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -644,6 +705,11 @@ async function handleGracefulShutdown(signal) {
   try {
     bot.stop(signal);
   } catch {}
+  for (const bridge of legacyBridges) {
+    try {
+      bridge.bot.stop(signal);
+    } catch {}
+  }
   try {
     sqliteMasterDb.close();
   } catch {}
@@ -657,6 +723,29 @@ async function handleGracefulShutdown(signal) {
 process.once('SIGTERM', () => handleGracefulShutdown('SIGTERM'));
 process.once('SIGINT', () => handleGracefulShutdown('SIGINT'));
 
+async function mountBotTransport(name, targetBot, webhookPath, renderUrl) {
+  if (renderUrl && process.env.USE_POLLING !== 'true') {
+    const webhookUrl = `${renderUrl.replace(/\/$/, '')}${webhookPath}`;
+    try {
+      webhookCallbacks.set(webhookPath, targetBot.webhookCallback(webhookPath));
+      await targetBot.telegram.setWebhook(webhookUrl, { allowed_updates: ['message', 'callback_query'] });
+      log.info(`✅ Webhook registado [${name}]: ${webhookUrl}`);
+      return;
+    } catch (err) {
+      webhookCallbacks.delete(webhookPath);
+      log.error(`Falha ao configurar webhook [${name}], fallback polling:`, err.message);
+    }
+  }
+
+  try {
+    await targetBot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
+    targetBot.launch({ allowedUpdates: ['message', 'callback_query'] }).catch((err) => log.error(`Erro polling [${name}]:`, err.message));
+    log.info(`✅ [${name}] ativo em modo Polling local!`);
+  } catch (err) {
+    log.error(`Erro ao iniciar polling [${name}]:`, err.message);
+  }
+}
+
 async function startMasterBot() {
   // 1. Boot Restore Obrigatório ANTES de abrir SQLite ou HTTP :3000
   try {
@@ -669,27 +758,15 @@ async function startMasterBot() {
 
   // 2. Iniciar servidor HTTP (Keep-Alive Render 10m gerido pelo ProactiveEngine)
   server.listen(PORT, () => {
-    log.info(`Servidor HTTP 100% Cloud-Native ativo na porta ${PORT} (@AndrePinheirobot | /webhook/master)`);
+    log.info(`Servidor HTTP 100% Cloud-Native ativo na porta ${PORT} (@AndrePinheirobot | /webhook/master + ${legacyBridges.length} pontes legacy)`);
   });
 
   startAutoDriveSync(15);
 
   const renderUrl = process.env.RENDER_EXTERNAL_URL || process.env.WEBHOOK_BASE_URL;
-  if (renderUrl && process.env.USE_POLLING !== 'true') {
-    const webhookUrl = `${renderUrl.replace(/\/$/, '')}/webhook/master`;
-    try {
-      masterWebhookCallback = bot.webhookCallback('/webhook/master');
-      await bot.telegram.setWebhook(webhookUrl, { allowed_updates: ['message', 'callback_query'] });
-      log.info(`✅ Webhook único registado: ${webhookUrl}`);
-    } catch (err) {
-      log.error(`Falha ao configurar webhook, fallback polling:`, err.message);
-      await bot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
-      bot.launch({ allowedUpdates: ['message', 'callback_query'] }).catch(() => {});
-    }
-  } else {
-    await bot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
-    bot.launch({ allowedUpdates: ['message', 'callback_query'] }).catch((err) => log.error('Erro polling:', err.message));
-    log.info('✅ @AndrePinheirobot ativo em modo Polling local!');
+  await mountBotTransport('@AndrePinheirobot', bot, '/webhook/master', renderUrl);
+  for (const bridge of legacyBridges) {
+    await mountBotTransport(bridge.name, bridge.bot, bridge.webhookPath, renderUrl);
   }
 
   // 3. Motor Proativo Unificado (node-cron Europe/Lisbon + Silêncio Noturno 22:30-07:30 + Lembretes 15s)

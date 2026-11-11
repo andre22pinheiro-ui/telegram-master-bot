@@ -172,7 +172,8 @@ Whitelist estrita (`TRUSTED_SOURCES` verificada via `isTrustedSource(url)`):
 | `trabalho` | **RotaBus** *(encaminhado para `@zeropaperfrotaBot`)* | `https://smooth-bus-routes.vercel.app` |
 
 ### 6.2 Endpoints HTTP Pessoais (`PORT=3000`, zero `/api/sync/*`)
-- **Webhook Único:** `POST /webhook/master`
+- **Webhook Principal:** `POST /webhook/master` (`@AndrePinheirobot`)
+- **Pontes Legacy Cloud-Native ([`src/bot/legacyBridges.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/bot/legacyBridges.js)):** `POST /webhook/dev` (`@DesSofBot`), `POST /webhook/immo` (`@ppspppBot`), `POST /webhook/pessoal` (`@AndTrarBOT`), `POST /webhook/nutricao` (`@Nutriainbot`) encaminhados para os workers unificados SQLite+IA, e `POST /webhook/frotas` (`@TrasFrotBot`) em redirecionamento estrito para **`@zeropaperfrotaBot`**.
 - **Estado & Catálogo:** `GET /`, `GET /health`, `GET /webapp`, `GET /api/apps`, `GET /portugal.m3u`
 - **API Familiar SQLite WAL ([`familyRoutes.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/familyRoutes.js)):** `/api/family/shopping`, `/api/family/tasks`, `/api/family/baby`, `/api/family/notes`
 

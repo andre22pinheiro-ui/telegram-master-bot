@@ -20,6 +20,14 @@ services:
         value: "3000"
       - key: TELEGRAM_BOT_TOKEN_MASTER
         sync: false
+      - key: TELEGRAM_DEV_TOKEN
+        sync: false
+      - key: TELEGRAM_IMMO_TOKEN
+        sync: false
+      - key: TELEGRAM_PESSOAL_TOKEN
+        sync: false
+      - key: TELEGRAM_NUTRICAO_TOKEN
+        sync: false
       - key: CHAT_ID_AUTORIZADO
         sync: false
       - key: CHAT_ID_ESPOSA
