@@ -1,9 +1,8 @@
 # Documento Mestre de Arquitetura e Operação do Sistema (100% Cloud-Native)
 
 > **Documento Canónico — Arquitetura 100% Cloud-Native (Zero Dependência de PC Local)**  
-> **Serviço Pessoal Nuvem 24/7:** [`https://telegram-master-bot-0h2h.onrender.com`](https://telegram-master-bot-0h2h.onrender.com)  
-> **Bot Único Pessoal:** `@AndrePinheirobot` (Webhook `POST /webhook/master`, `:3000`)  
-> **Bot Único Empresarial:** `@zeropaperfrotaBot` (`zeropaper-frota-bot`, Webhook `POST /webhook/frota`, `TELEGRAM_FROTAS_TOKEN`)  
+> **Serviço Pessoal Nuvem 24/7 (`0h2h`):** [`https://telegram-master-bot-0h2h.onrender.com`](https://telegram-master-bot-0h2h.onrender.com) (`@AndrePinheirobot`, `POST /webhook/master`, `:3000`)  
+> **Serviço Empresarial Nuvem 24/7 (`17bj` reaproveitado):** [`https://telegram-master-bot-17bj.onrender.com`](https://telegram-master-bot-17bj.onrender.com) (`@zeropaperfrotaBot`, repo `andre22pinheiro-ui/zeropaper-frota-bot`, `POST /webhook/frota`, `TELEGRAM_FROTAS_TOKEN`)  
 > **Runtime:** Node.js ESM (`>=20.0.0`, Docker `node:20-alpine` no Render) | **Fuso Horário:** `Europe/Lisbon`
 
 ---
@@ -147,10 +146,10 @@ Whitelist estrita (`TRUSTED_SOURCES` verificada via `isTrustedSource(url)`):
 
 ### 5.4 Email IMAP, DGEG, Farmácias, Família, Lembretes, IPTV & Cloud DevOps
 - **Email (`ImapFlow` + `mailparser`):** `/emails`, `/ler_email <N|assunto>`, `/email_status`, `/briefing`.
-- **Utilidade Pública:** `/combustiveis [concelho]`, `/gasoleo`, `/gasolina` (API DGEG), `/farmacias [concelho]`, `/transito`, `/pesquisa <termo>`.
-- **Família & Lembretes DST-safe:** `/compras`, `/tarefas`, `/carolina`, `/notas`, `/lembrete`.
+- **Utilidade Pública & Direito Pessoal:** `/combustiveis [concelho]`, `/gasoleo`, `/gasolina` (API DGEG), `/farmacias [concelho]`, `/transito`, `/pesquisa <termo>`, `/codigo_estrada`, `/sri` / `/cadeirinha` (Art. 55.º CE), `/dl84` (DL 84/2021 3 anos), `/mapa [pesquisa]` (`amaranteMapService.js` + `data/maps/amarante.osm`), `/ergonomia`.
+- **Família, Agenda & Lembretes DST-safe:** `/compras`, `/tarefas`, `/carolina`, `/notas`, `/lembrete`, `/agenda` / `/evento` (`calendarHelperService.js` c/ exportação Google Calendar RGPD-safe).
 - **IPTV & Streaming:** `/tv [canal]`, `/canal`, `/portugal.m3u`.
-- **DevOps 100% Cloud ([`cloudDevService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/cloudDevService.js) + [`worker_dev.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/workers/worker_dev.js)):** `/status_cloud`, `/compilar <repo> [workflow] [branch]` (GitHub Actions `workflow_dispatch` + notificação de conclusão), `/projetos`, `/criar_app` (+ webhook Vercel), `/apps` (API live Vercel), `/apks`.
+- **DevOps 100% Cloud ([`cloudDevService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/services/cloudDevService.js) + [`worker_dev.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/workers/worker_dev.js)):** `/status_cloud`, `/compilar <repo> [workflow] [branch]` (GitHub Actions `workflow_dispatch`), `/projetos`, `/criar_app`, `/apps` (API live Vercel), `/apks`, `/pladur [m2]` (`pladurService.js` EN 520 / EN 14195), `/erros` & `/self_refine` (`selfRefineEngine.js` integrado no `safeExecute` e webhooks).
 - **Administração & Drive:** `/autorizados`, `/autorizar`, `/bloquear`, `/drive`, `/diagnostico`, `/status`.
 
 ---
@@ -181,11 +180,12 @@ Whitelist estrita (`TRUSTED_SOURCES` verificada via `isTrustedSource(url)`):
 
 ## 7. Serviço Isolado de Trabalho (`zeropaper-frota-bot`)
 
-Localizado em [`c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot) (`@zeropaperfrotaBot`, declarado como serviço autónomo no [`render.yaml`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/render.yaml)):
-- Endpoint dedicado **`POST /webhook/frota`** autenticado por **`TELEGRAM_FROTAS_TOKEN`** (com fallback `TELEGRAM_BOT_TOKEN` local) e `TELEGRAM_WEBHOOK_SECRET` opcional.
+Localizado em [`c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot) (`@zeropaperfrotaBot`, servido em **`https://telegram-master-bot-17bj.onrender.com`** e declarado no [`render.yaml`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/render.yaml)):
+- Endpoint dedicado **`POST /webhook/frota`** autenticado por **`TELEGRAM_FROTAS_TOKEN`** (`fleetWebhookTransport.js` com `getWebhookInfo`, backoff 429 e zero polling em nuvem) e `TELEGRAM_WEBHOOK_SECRET` opcional.
 - Persistência operacional isolada no **Supabase** (`AppFrota`), confirmação em 2 passos, idempotência SHA-256 e matriz RBAC por perfil.
-- [`src/services/routeService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot/src/services/routeService.js): implementa `/rota` (OpenRouteService `driving-hgv`, sem distâncias inventadas se `ORS_API_KEY` falhar) e `/tacografo` (Reg. CE n.º 561/2006, Reg. UE n.º 165/2014, DL 114/94, DL 169/2009, Lei 27/2010 — limites 4h30 / 45m ou 15m+30m / 9h-10h / 56h semanal / 90h quinzenal).
-- [`src/services/fleetProactiveService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot/src/services/fleetProactiveService.js): proatividade em turno — avisos preventivos 30 min e 15 min antes das 4h30 de condução contínua (`evaluateDrivingLimitAlert`), alerta matinal `07:30` de anomalias abertas em Supabase (`buildShiftStartAnomalyAlert`) e lembrete de fecho de turno KM/higiene `19:30` (`buildShiftEndReminder`).
+- [`src/services/routeService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot/src/services/routeService.js) + [`amaranteHeavyMapService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot/src/services/amaranteHeavyMapService.js): `/rota` (ORS `driving-hgv` + contexto OSM Amarante sem restrições inventadas) e `/tacografo` (CE 561/2006 & UE 165/2014 integrado com `evaluateDrivingLimitAlert`).
+- [`src/services/fleetComplianceService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot/src/services/fleetComplianceService.js): módulos `/tcc` (`UFCD-TCC-01..03`, Lei 13/2006, Smart Tacho Gen 2), `/gsr2` (Reg. UE 2019/2144 ADAS/BSIS/MOIS/EDR) e `/leis` pesados / DRE.
+- [`src/services/fleetProactiveService.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot/src/services/fleetProactiveService.js): proatividade em turno — avisos preventivos 30 min e 15 min antes das 4h30 (`evaluateDrivingLimitAlert`), alerta matinal `07:30` / botão cockpit `btn_shift_anomalies` de anomalias abertas em Supabase (`buildShiftStartAnomalyAlert`) e fecho `19:30`.
 
 ---
 

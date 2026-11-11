@@ -36,7 +36,11 @@ const cloudDevService = await import('../src/services/cloudDevService.js');
 const workerNutricao = await import('../src/workers/worker_nutricao.js');
 const workerImmo = await import('../src/workers/worker_immo.js');
 const workerDev = await import('../src/workers/worker_dev.js');
-const { parseReminderInput } = await import('../src/workers/worker_geral.js');
+const workerGeral = await import('../src/workers/worker_geral.js');
+const { parseReminderInput } = workerGeral;
+const selfRefineEngine = await import('../src/shared/selfRefineEngine.js');
+const calendarHelperService = await import('../src/services/calendarHelperService.js');
+const { safeExecute } = await import('../src/utils/resilience.js');
 const { sanitizeTelegramMarkdown } = await import('../src/utils/markdownSanitizer.js');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -800,6 +804,71 @@ async function main() {
         end: () => {}
       });
       assert(statusWritten === 500, 'Erro síncrono/assíncrono no webhookCallback deve devolver 500 sem derrubar o servidor Node');
+    });
+
+    // =========================================================================
+    // 16. NOVOS SERVIÇOS INTEGRADOS (Self-Refine, Pladur, Lei PT, Agenda, OSM, 17bj)
+    // =========================================================================
+    await runTest('SVC-01', 'Serviços Legacy Integrados (Self-Refine, Pladur, Direito Pessoal, Agenda, OSM Amarante, 17bj)', async () => {
+      const mockCtx = { chat: { id: '950415577' }, from: { id: 950415577, first_name: 'André' } };
+
+      const pladurOut = await workerDev.handle('/pladur 25', mockCtx);
+      assert(pladurOut.includes('EN 520') && pladurOut.includes('EN 14195'), 'Pladur deve referir EN 520 e EN 14195');
+      assert(pladurOut.includes('52.5 m²') && pladurOut.includes('50.0 m lineares'), 'Pladur 25m² deve calcular rácios exatos');
+
+      const sriOut = await workerGeral.handle('/leis cadeirinha', mockCtx);
+      assert(sriOut.includes('Art. 55.º') && sriOut.includes('135 cm'), '/leis cadeirinha deve devolver Art. 55.º SRI');
+
+      const dl84Out = await workerGeral.handle('/dl84', mockCtx);
+      assert(dl84Out.includes('84/2021') && dl84Out.includes('3 anos'), '/dl84 deve devolver garantias 3 anos DL 84/2021');
+
+      const codigoOut = await routeMessage('/codigo_estrada', mockCtx);
+      assert(codigoOut.includes('120 km/h') && codigoOut !== FLEET_REDIRECT_MSG, '/codigo_estrada fica no Master Pessoal');
+
+      const tccRedirect = await routeMessage('/tcc escolar', mockCtx);
+      const tachoRedirect = await routeMessage('regras smart tacho gen 2', mockCtx);
+      assert(tccRedirect === FLEET_REDIRECT_MSG && tachoRedirect === FLEET_REDIRECT_MSG, 'TCC e Smart Tacho devem redirecionar para @zeropaperfrotaBot');
+
+      const agendaOut = await workerGeral.handle('/agenda amanhã às 15h Pediatra Carolina', mockCtx);
+      assert(agendaOut.includes('Pediatra Carolina') && agendaOut.includes('calendar.google.com/calendar/render'), '/agenda deve gerar link Google Calendar');
+      assert(!agendaOut.includes('@gmail.com'), '/agenda não deve expor email pessoal em claro (RGPD)');
+      const icsOut = calendarHelperService.generateIcsContent('Vistoria Casa', new Date('2026-12-01T10:00:00Z'), 45);
+      assert(icsOut.includes('BEGIN:VCALENDAR') && icsOut.includes('END:VCALENDAR'), 'ICS deve respeitar formato VCALENDAR');
+
+      const mapaOut = await workerGeral.handle('/mapa', mockCtx);
+      assert(mapaOut.includes('CARTOGRAFIA OFICIAL OSM DE AMARANTE') && mapaOut.includes('125'), '/mapa deve ler amarante.osm empacotado');
+
+      const avalOut = await workerImmo.handle('/avaliacao 120 Amarante T3 bom', mockCtx);
+      assert(avalOut.includes('CMVM') && avalOut.includes('OSM Amarante'), 'Avaliação em Amarante deve anexar infraestrutura OSM');
+
+      const errReply = await safeExecute(async () => {
+        throw new Error('Falha simulada TestWorker');
+      }, 'TestWorker');
+      assert(errReply.includes('Aviso temporário'), 'safeExecute deve conter exceção graciosamente');
+
+      const errosList = await workerDev.handle('/erros', mockCtx);
+      assert(errosList.includes('Falha simulada TestWorker'), 'safeExecute deve persistir erro em error_reports para /erros');
+
+      const diagMock = await selfRefineEngine.diagnoseAndRefineError({
+        filePath: path.join(ROOT_DIR, 'src/services/pladurService.js'),
+        errorMessage: 'Erro mock de teste',
+        errorStack: 'at mock:1:1',
+        completionFn: async () => JSON.stringify({ rootCause: 'Mock cause', summary: 'Mock fix', patchedCode: '// ok' })
+      });
+      assert(diagMock.success && diagMock.rootCause === 'Mock cause', 'diagnoseAndRefineError deve funcionar via cascata determinística');
+
+      const errosResolved = await workerDev.handle('/erros resolver', mockCtx);
+      assert(errosResolved.includes('marcado(s) como resolvido(s)'), '/erros resolver deve encerrar relatórios abertos');
+
+      const cloudStat = await cloudDevService.getCloudStatusReport({ measureNetwork: false });
+      assert(cloudStat.includes('STATUS CLOUD-NATIVE') && cloudStat.includes('16 tabelas') && cloudStat.includes('Self-Refine'), 'Status Cloud deve manter contrato e reportar Self-Refine');
+
+      const idxSrc = fs.readFileSync(path.join(ROOT_DIR, 'index.js'), 'utf-8');
+      for (const cmd of ["'pladur'", "'erros'", "'agenda'", "'mapa'", "'codigo_estrada'", "'sri'", "'dl84'"]) {
+        assert(idxSrc.includes(cmd), `index.js deve registar comando ${cmd}`);
+      }
+      const yamlSrc = fs.readFileSync(path.join(ROOT_DIR, 'render.yaml'), 'utf-8');
+      assert(yamlSrc.includes('telegram-master-bot-0h2h.onrender.com') && yamlSrc.includes('telegram-master-bot-17bj.onrender.com'), 'render.yaml deve mapear serviços 0h2h (Master) e 17bj (Frota)');
     });
   } finally {
     sqliteMasterDb.close();

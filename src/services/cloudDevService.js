@@ -84,6 +84,10 @@ export async function getCloudStatusReport({ measureNetwork = true } = {}) {
     : '🟡 Configurado (aguarda ciclo)';
 
   const renderUrl = process.env.RENDER_EXTERNAL_URL || 'local / não definido';
+  let openErrors = 0;
+  try {
+    openErrors = (sqliteMasterDb.getErrorReports(50) || []).filter((r) => !r.resolved).length;
+  } catch {}
 
   return (
     `☁️ *STATUS CLOUD-NATIVE (@AndrePinheirobot)*\n` +
@@ -95,6 +99,7 @@ export async function getCloudStatusReport({ measureNetwork = true } = {}) {
     `• 🗄️ *SQLite WAL (${Object.keys(dbStats.tables).length} tabelas):* ${sqlMs} ms\n` +
     `  - Família: Compras(${dbStats.tables.shopping}) Tarefas(${dbStats.tables.tasks}) Carolina(${dbStats.tables.baby_logs}) Lembretes(${dbStats.tables.reminders})\n` +
     `  - Radar 5 Frentes: ${totalRadar} anúncios | Filtros(${dbStats.tables.radar_filtros}) | Receitas(${dbStats.tables.saved_recipes})\n` +
+    `• 🛡️ *Self-Refine (\`error_reports\`):* ${openErrors} abertos (${dbStats.tables.error_reports} total)\n` +
     `• ☁️ *Google Drive Write-Through (5s + 15m):* ${driveLabel}\n` +
     `• 🧠 *Cascata IA:* \`temperature: 0.0\` (Gemini ➔ Groq ➔ OpenRouter)\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━\n` +

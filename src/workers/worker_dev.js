@@ -1,4 +1,5 @@
 // src/workers/worker_dev.js — Engenharia DevOps 100% Cloud-Native (delegação limpa para cloudDevService.js)
+import path from 'path';
 import { createLogger } from '../utils/logger.js';
 import {
   getGithubConfig,
@@ -8,6 +9,13 @@ import {
   dispatchGithubBuild,
   listVercelAppsOrDeployments
 } from '../services/cloudDevService.js';
+import { getPladurSpecifications } from '../services/pladurService.js';
+import {
+  getErrorStatusMarkdown,
+  resolveOpenErrors,
+  diagnoseAndRefineError
+} from '../shared/selfRefineEngine.js';
+import { sqliteMasterDb } from '../shared/sqliteMasterDb.js';
 import { askAgent } from '../services/reasoningService.js';
 
 const log = createLogger('WorkerDevCloud');
@@ -88,6 +96,45 @@ export async function handle(text, ctx = {}) {
   if (/^\/criar_app\b/i.test(lower)) return await createCloudRepoAndDeploy(trimmed.replace(/^\/criar_app\s*/i, ''));
   if (/^\/(apps?|links?|catalogo|catalogo_apps|vercel)\b/i.test(lower)) return await listVercelAppsOrDeployments();
   if (/^\/(apks?|download_apk|android)\b/i.test(lower)) return handleApks();
+
+  if (/^\/pladur\b/i.test(lower) || /\b(pladur|en\s*520|en\s*14195|divis[oó]ria\s+gesso)\b/i.test(lower)) {
+    const areaMatch = trimmed.match(/(\d+(?:[.,]\d+)?)\s*(?:m2|m²)?/i);
+    return getPladurSpecifications(trimmed.startsWith('/pladur') ? trimmed.replace(/^\/pladur\s*/i, '') : areaMatch?.[1] || '');
+  }
+
+  if (/^\/erros?\b/i.test(lower)) {
+    const sub = trimmed.replace(/^\/erros?\s*/i, '').trim().toLowerCase();
+    if (sub === 'resolver' || sub === 'limpar' || sub === 'clear') {
+      const res = resolveOpenErrors();
+      return `✅ *Self-Refine:* ${res.resolvedCount} erro(s) marcado(s) como resolvido(s).\n\n${getErrorStatusMarkdown(10)}`;
+    }
+    return getErrorStatusMarkdown(10);
+  }
+
+  if (/^\/self_refine\b/i.test(lower)) {
+    const rawTarget = trimmed.replace(/^\/self_refine\s*/i, '').trim();
+    const reports = sqliteMasterDb.getErrorReports(10) || [];
+    const latestOpen = reports.find((r) => !r.resolved) || reports[0];
+    if (!latestOpen && !rawTarget) {
+      return getErrorStatusMarkdown(10);
+    }
+    const safeTarget = rawTarget && !rawTarget.includes('..') ? path.resolve(rawTarget) : path.resolve('index.js');
+    const diag = await diagnoseAndRefineError({
+      filePath: safeTarget,
+      errorMessage: latestOpen?.message || 'Verificação preventiva solicitada manualmente.',
+      errorStack: latestOpen?.stack || ''
+    });
+    if (!diag.success) {
+      return `⚠️ *Auto-Diagnóstico Self-Refine:* ${diag.error}\n\n${getErrorStatusMarkdown(5)}`;
+    }
+    return (
+      `🧠 *DIAGNÓSTICO SELF-REFINE (${path.basename(safeTarget)})*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `• *Causa Raiz:* ${diag.rootCause}\n` +
+      `• *Resumo Técnico:* ${diag.summary}\n` +
+      `• _Nota:_ Código sugerido pronto para revisão antes de qualquer commit.`
+    );
+  }
 
   return await handleCode(trimmed, chatId);
 }

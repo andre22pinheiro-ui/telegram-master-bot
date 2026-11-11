@@ -3,6 +3,7 @@ import { createLogger } from '../utils/logger.js';
 import { sqliteMasterDb } from '../shared/sqliteMasterDb.js';
 import { askAgent } from '../services/reasoningService.js';
 import { avaliarImovelCmvm, formatarAvaliacaoMarkdown } from '../services/immoCmvmService.js';
+import { amaranteMapService } from '../services/amaranteMapService.js';
 import { VERCEL_IMMO_APP, formatarSitesImobiliariosMarkdown } from '../shared/immoSitesCatalog.js';
 import {
   gerarRelatorioMultiFrenteMarkdown,
@@ -55,7 +56,14 @@ function handleAvaliacaoComando(args = '') {
     estado
   });
 
-  return formatarAvaliacaoMarkdown(resultado);
+  let out = formatarAvaliacaoMarkdown(resultado);
+  if (/amarante|s[aã]o\s*gon[cç]alo|cepelo|tel[oõ]es|lomba|madalena/i.test(zona)) {
+    const osmCtx = amaranteMapService.getUrbanContextSummary();
+    if (osmCtx) {
+      out += `\n\n${osmCtx}`;
+    }
+  }
+  return out;
 }
 
 function handleVigiarCommand(rawArgs = '', ctx = {}) {

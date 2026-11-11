@@ -25,6 +25,7 @@ import { analyzeImageBuffer, downloadTelegramPhoto } from './src/shared/multimod
 import { uploadToCloudinary } from './src/shared/cloudinaryCdn.js';
 import { transcribeTelegramAudio } from './src/shared/whisperAudio.js';
 import { safeExecute, withTypingHeartbeat } from './src/utils/resilience.js';
+import { recordExecutionError } from './src/shared/selfRefineEngine.js';
 import { sanitizeTelegramMarkdown } from './src/utils/markdownSanitizer.js';
 import {
   authMiddleware,
@@ -247,10 +248,11 @@ bot.command('ajuda', async (ctx) => {
     `• \`/apple [modelo]\` | \`/iphone_preco\` | \`/apple_refurb\` | \`/vigiar_apple\` (Novo 3A vs Grau A)\n` +
     `• \`/vigiar <cat> <termo> [preço]\` | \`/meus_alertas\` | \`/radar\` | \`/relatorio\`\n\n` +
     `*🏡 Família, Produtividade & Utilitários:*\n` +
-    `• \`/compras\` | \`/tarefas\` | \`/carolina\` | \`/nota\` | \`/lembrete\` | \`/briefing\`\n` +
+    `• \`/compras\` | \`/tarefas\` | \`/carolina\` | \`/nota\` | \`/lembrete\` | \`/agenda\` | \`/briefing\`\n` +
+    `• \`/codigo_estrada\` | \`/sri\` | \`/dl84\` | \`/mapa\` | \`/ergonomia\`\n` +
     `• \`/emails\` | \`/ler_email N\` | \`/farmacias\` | \`/pesquisa\` | \`/combustiveis\` | \`/transito\` | \`/tv\` | \`/apps\`\n\n` +
-    `*☁️ DevOps 100% Cloud (Render + GitHub Actions + Drive):*\n` +
-    `• \`/status_cloud\` | \`/compilar <repo>\` | \`/projetos\` | \`/criar_app\` | \`/drive\``;
+    `*☁️ DevOps 100% Cloud & Engenharia (Render + GitHub Actions + Drive):*\n` +
+    `• \`/status_cloud\` | \`/compilar <repo>\` | \`/projetos\` | \`/criar_app\` | \`/pladur [m2]\` | \`/erros\` | \`/drive\``;
 
   await sendReply(ctx, msg, getMasterKeyboard());
 });
@@ -274,9 +276,16 @@ bot.command(['noticias_regiao', 'amarante'], async (ctx) => {
   await sendReply(ctx, await getRegionalNews());
 });
 
-bot.command(['governo', 'leis'], async (ctx) => {
+bot.command('governo', async (ctx) => {
   await ctx.sendChatAction('typing');
   await sendReply(ctx, await getGovNews());
+});
+
+bot.command('leis', async (ctx) => {
+  await ctx.sendChatAction('typing');
+  const args = (ctx.message?.text || '').replace(/^\/leis\s*/i, '').trim();
+  const out = args ? await handleGeral(ctx.message.text, ctx) : await getGovNews();
+  await sendReply(ctx, out);
 });
 
 bot.command(['hoje', 'macros', 'resumo', 'nutri_hoje'], async (ctx) => {
@@ -296,7 +305,7 @@ bot.command(['plano', 'dieta', 'proteina', 'agua', 'creatina', 'receita', 'recei
   await sendReply(ctx, await handleNutricao(ctx.message.text, ctx));
 });
 
-bot.command(['compras', 'tarefas', 'carolina', 'nota', 'notas', 'lembrete', 'lembretes', 'briefing', 'emails', 'email', 'correio', 'inbox', 'ler_email', 'resumo_email', 'email_status', 'combustiveis', 'gasoleo', 'gasolina', 'transito', 'trajeto', 'farmacias', 'pesquisa', 'procura', 'web'], async (ctx) => {
+bot.command(['compras', 'tarefas', 'carolina', 'nota', 'notas', 'lembrete', 'lembretes', 'agenda', 'evento', 'briefing', 'emails', 'email', 'correio', 'inbox', 'ler_email', 'resumo_email', 'email_status', 'combustiveis', 'gasoleo', 'gasolina', 'transito', 'trajeto', 'farmacias', 'pesquisa', 'procura', 'web', 'codigo_estrada', 'sri', 'cadeirinha', 'dl84', 'mapa', 'amarante_mapa', 'ergonomia'], async (ctx) => {
   await ctx.sendChatAction('typing');
   await sendReply(ctx, await handleGeral(ctx.message.text, ctx));
 });
@@ -306,7 +315,7 @@ bot.command(['radar', 'pesquisar_imoveis', 'varredura', 'casas', 'moradias_novas
   await sendReply(ctx, await handleImmo(ctx.message.text, ctx));
 });
 
-bot.command(['projetos', 'criar_app', 'compilar', 'build', 'status_cloud', 'status_nuvem', 'cloud', 'diagnostico', 'status', 'code', 'deploy', 'pc', 'pc_status', 'pc_sistema', 'hardware', 'print', 'screenshot', 'ecra', 'ecrã'], async (ctx) => {
+bot.command(['projetos', 'criar_app', 'compilar', 'build', 'status_cloud', 'status_nuvem', 'cloud', 'diagnostico', 'status', 'code', 'deploy', 'pc', 'pc_status', 'pc_sistema', 'hardware', 'print', 'screenshot', 'ecra', 'ecrã', 'pladur', 'erros', 'self_refine'], async (ctx) => {
   await ctx.sendChatAction('typing');
   const reply = /^\/status_nuvem\b/i.test(ctx.message.text)
     ? await handleStatusCloud()
@@ -572,6 +581,13 @@ bot.on('audio', handleMasterVoice);
 
 bot.catch((err, ctx) => {
   log.error('Erro não tratado no Grok Bot:', err?.message || err);
+  try {
+    recordExecutionError({
+      serviceName: 'telegraf_master',
+      error: err,
+      context: { updateType: ctx?.updateType || 'unknown' }
+    });
+  } catch {}
   ctx?.reply('⚠️ Ocorreu um erro. O bot continua operacional.').catch(() => {});
 });
 

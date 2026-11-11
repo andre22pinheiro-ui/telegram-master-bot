@@ -1,5 +1,6 @@
 // src/utils/resilience.js — Mecanismo de Timeout Preventivo e Contenção de Erros
 import { createLogger } from './logger.js';
+import { recordExecutionError } from '../shared/selfRefineEngine.js';
 
 const log = createLogger('Resilience');
 
@@ -58,6 +59,13 @@ export async function safeExecute(
       error: err?.message || err,
       name: err?.name
     });
+    try {
+      recordExecutionError({
+        serviceName: workerName,
+        error: err,
+        context: { timeoutMs }
+      });
+    } catch {}
 
     if (err.name === 'TimeoutError' || err.message?.includes('demorou')) {
       return `⏱️ *Tempo Limite Excedido (${Math.round(timeoutMs / 1000)}s)*\n\nO módulo *${workerName}* não obteve resposta a tempo da API externa. O bot continua 100% ativo. Tenta novamente em instantes.`;

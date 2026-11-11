@@ -1,6 +1,7 @@
 // src/bot/legacyBridges.js — Ponte de Compatibilidade Legacy & Upgrade Sem Conflitos para @AndrePinheirobot
 import { Telegraf, Markup } from 'telegraf';
 import { createLogger } from '../utils/logger.js';
+import { recordExecutionError } from '../shared/selfRefineEngine.js';
 import { FLEET_REDIRECT_MSG, detectIntent } from '../router/masterRouter.js';
 import { VERCEL_APPS, buildTelegramAppsKeyboard, formatAllVercelAppsMarkdown } from '../shared/appsCatalog.js';
 import { formatarSitesImobiliariosMarkdown, buildImmoSitesKeyboard } from '../shared/immoSitesCatalog.js';
@@ -341,7 +342,10 @@ export function createLegacyBridgeBots(deps, env = process.env) {
     bridgeBot.use(authMiddleware);
     bridgeBot.use(cleanChatMiddleware);
     wireLegacySpecificBot(bridgeBot, cfg, deps);
-    bridgeBot.catch((err) => log.error(`Erro no Bridge [${cfg.name}]:`, err?.message || err));
+    bridgeBot.catch((err) => {
+      log.error(`Erro no Bridge [${cfg.name}]:`, err?.message || err);
+      try { recordExecutionError({ serviceName: `bridge_${cfg.key}`, error: err }); } catch {}
+    });
     instances.push({ ...cfg, bot: bridgeBot });
   }
 
@@ -369,6 +373,7 @@ export async function mountBotTransport({
     webhookCallbacks.set(webhookPath, (req, res) =>
       Promise.resolve(rawCallback(req, res)).catch((err) => {
         log.error(`Erro não tratado no webhook [${name}]:`, err?.message || err);
+        try { recordExecutionError({ serviceName: `webhook_${name}`, error: err, context: { webhookPath } }); } catch {}
         if (!res.headersSent) {
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: 'Webhook processing error' }));

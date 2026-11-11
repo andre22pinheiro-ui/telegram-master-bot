@@ -1,95 +1,136 @@
-import "dotenv/config";
-import fs from "fs";
-import path from "path";
-import { Octokit } from "@octokit/rest";
-import { sqliteMasterDb } from "./sqliteMasterDb.js";
+// src/shared/selfRefineEngine.js — Motor de Registo de Erros (SQLite WAL) & Auto-Diagnóstico Cloud
+import 'dotenv/config';
+import fs from 'fs';
+import path from 'path';
+import { Octokit } from '@octokit/rest';
+import { sqliteMasterDb } from './sqliteMasterDb.js';
+import { generateDeterministicCompletion } from '../services/reasoningService.js';
 
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GITHUB_OWNER = process.env.GITHUB_OWNER || "andre22pinheiro-ui";
-const GITHUB_REPO = process.env.GITHUB_REPO || "telegram-master-bot";
-const GEMINI_KEY = process.env.GEMINI_API_KEY;
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
+const GITHUB_OWNER = process.env.GITHUB_OWNER || 'andre22pinheiro-ui';
+const GITHUB_REPO = process.env.GITHUB_REPO || 'telegram-master-bot';
 
 const octokit = GITHUB_TOKEN ? new Octokit({ auth: GITHUB_TOKEN }) : null;
 
 /**
- * 1. TRAP DE ERROS & LOGS ESTRUTURADOS (SQLite WAL error_reports)
+ * 1. Trap estruturado de erros em SQLite WAL (`error_reports`).
  */
-export function recordExecutionError({ serviceName, error, context = {} }) {
-  const message = error?.message || String(error);
+export function recordExecutionError({ serviceName = 'system', error, context = {} } = {}) {
+  const message = error?.message || String(error || 'Erro desconhecido');
   const stack = error?.stack || null;
-  let report = null;
   try {
-    report = sqliteMasterDb.addErrorReport({
-      service: serviceName || "system",
+    return sqliteMasterDb.addErrorReport({
+      service: serviceName || 'system',
       message,
       stack,
       context
     });
   } catch {
-    report = {
+    return {
       id: `err_${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      service: serviceName,
+      created_at: new Date().toISOString(),
+      service: serviceName || 'system',
       message,
       stack,
       context,
       resolved: false
     };
   }
-
-  console.error(`🚨 [TRAP ERRO - ${String(serviceName || "SYSTEM").toUpperCase()}] ${message}`);
-  return report;
 }
 
 /**
- * 2. MÓDULO DE AUTO-DIAGNÓSTICO (SELF-REFINE / AGENTIC REFLECTION)
- * Analisa a exceção, lê o ficheiro envolvido e gera a correção via IA
+ * Lista relatórios de erros abertos/recentes formatados para Telegram.
  */
-export async function diagnoseAndRefineError({ filePath, errorMessage, errorStack }) {
-  let sourceCode = "";
+export function getErrorStatusMarkdown(limit = 10) {
+  let reports = [];
   try {
-    if (fs.existsSync(filePath)) {
-      sourceCode = fs.readFileSync(filePath, "utf-8");
+    reports = sqliteMasterDb.getErrorReports(limit) || [];
+  } catch (err) {
+    return `⚠️ *Telemetria Self-Refine indisponível:* ${err.message}`;
+  }
+
+  const open = reports.filter((r) => !r.resolved);
+  const resolved = reports.length - open.length;
+
+  if (reports.length === 0) {
+    return (
+      `🛡️ *SELF-REFINE ENGINE — ESTADO LIMPO*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `• Erros em aberto: **0**\n` +
+      `• Histórico recente: **0** registos na tabela \`error_reports\` (SQLite WAL).`
+    );
+  }
+
+  const lines = reports.slice(0, limit).map((r, idx) => {
+    const badge = r.resolved ? '✅' : '🔴';
+    const dt = String(r.created_at || '').slice(0, 19).replace('T', ' ');
+    const cleanMsg = String(r.message || '').replace(/[*_`]/g, ' ').slice(0, 120);
+    return `${idx + 1}. ${badge} \`${r.id}\` [${r.service}] (${dt}): ${cleanMsg}`;
+  });
+
+  return (
+    `🛠️ *SELF-REFINE ENGINE — REGISTO DE ERROS*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `• Em aberto: **${open.length}** | Resolvidos (amostra): **${resolved}**\n\n` +
+    `${lines.join('\n')}\n\n` +
+    `${open.length > 0 ? '💡 _Para marcar erros abertos como resolvidos:_ `/erros resolver`\n' : ''}` +
+    `💡 _Para auto-diagnóstico por ficheiro:_ \`/self_refine src/caminho.js\``
+  );
+}
+
+/**
+ * Marca todos os erros abertos na amostra atual como resolvidos.
+ */
+export function resolveOpenErrors(limit = 30) {
+  const reports = sqliteMasterDb.getErrorReports(limit) || [];
+  const open = reports.filter((r) => !r.resolved);
+  for (const r of open) {
+    sqliteMasterDb.markErrorReportResolved(r.id);
+  }
+  return { resolvedCount: open.length };
+}
+
+/**
+ * 2. Auto-diagnóstico determinístico usando a cascata IA (`temperature: 0.0`).
+ */
+export async function diagnoseAndRefineError({
+  filePath,
+  errorMessage,
+  errorStack,
+  completionFn = generateDeterministicCompletion
+}) {
+  let sourceCode = '';
+  try {
+    if (filePath && fs.existsSync(filePath)) {
+      sourceCode = fs.readFileSync(filePath, 'utf-8');
     }
   } catch (e) {
     return { success: false, error: `Não foi possível ler o código-fonte em ${filePath}: ${e.message}` };
   }
 
   const prompt =
-    `Você é o Engenheiro Sénior de Auto-Melhoramento Autónomo (Self-Refine Engine).\n` +
-    `Foi detetado um erro em tempo de execução no seguinte ficheiro: "${path.basename(filePath)}".\n\n` +
-    `DETALHE DO ERRO:\n${errorMessage}\n\n` +
-    `STACK TRACE:\n${errorStack || "Sem stack"}\n\n` +
-    `CÓDIGO-FONTE ATUAL:\n\`\`\`javascript\n${sourceCode}\n\`\`\`\n\n` +
-    `INSTRUÇÕES DE REFLEXÃO E CORREÇÃO:\n` +
-    `1. Identifique a causa raiz (lógica, sintaxe, chamada assíncrona ou parâmetro undefined).\n` +
-    `2. Devolva APENAS um objeto JSON válido (sem texto fora do JSON) com a estrutura:\n` +
-    `{\n` +
-    `  "rootCause": "Explicação concisa da falha",\n` +
-    `  "summary": "Resumo da correção aplicada",\n` +
-    `  "patchedCode": "Código-fonte completo e corrigido pronto para substituição integral"\n` +
-    `}`;
+    `És o Engenheiro Sénior de Diagnóstico (Self-Refine Engine | temperature=0.0).\n` +
+    `Ficheiro: "${path.basename(filePath || 'desconhecido')}".\n\n` +
+    `ERRO:\n${errorMessage}\n\n` +
+    `STACK:\n${errorStack || 'Sem stack'}\n\n` +
+    `${sourceCode ? `CÓDIGO ATUAL:\n\`\`\`javascript\n${sourceCode.slice(0, 6000)}\n\`\`\`\n\n` : ''}` +
+    `Responde APENAS em JSON válido (sem markdown extra):\n` +
+    `{"rootCause":"...","summary":"...","patchedCode":"..."}`;
 
   try {
-    const geminiKey = process.env.GEMINI_API_KEY || GEMINI_KEY;
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent`;
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-goog-api-key": geminiKey
-      },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.0, maxOutputTokens: 4096 }
-      })
+    const aiRes = await completionFn({
+      systemPrompt: 'És o engenheiro sénior de diagnóstico determinístico. Responde apenas em JSON válido.',
+      prompt,
+      maxTokens: 2048
     });
 
-    const data = await res.json();
-    let textOut = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    textOut = textOut.replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
+    const rawText = aiRes?.text || (typeof aiRes === 'string' ? aiRes : '');
+    if (!rawText) {
+      return { success: false, error: 'Cascata IA indisponível ou sem chaves para auto-diagnóstico.' };
+    }
 
-    const parsed = JSON.parse(textOut);
+    const cleaned = rawText.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+    const parsed = JSON.parse(cleaned);
     return {
       success: true,
       rootCause: parsed.rootCause,
@@ -103,31 +144,26 @@ export async function diagnoseAndRefineError({ filePath, errorMessage, errorStac
 }
 
 /**
- * 3. UPDATE NO GITHUB VIA @octokit/rest
- * Escreve o código corrigido localmente e efetua o commit no GitHub para acionar o deploy contínuo
+ * 3. Commit remoto no GitHub via Octokit (quando GITHUB_TOKEN está configurado).
  */
 export async function commitAndPushFix({ relativePath, newContent, commitMessage }) {
-  // 1. Atualizar ficheiro local primeiro
   const localAbsPath = path.resolve(relativePath);
   try {
-    fs.writeFileSync(localAbsPath, newContent, "utf-8");
+    fs.writeFileSync(localAbsPath, newContent, 'utf-8');
   } catch (fsErr) {
     return { success: false, error: `Falha ao gravar correção localmente: ${fsErr.message}` };
   }
 
-  // 2. Commit remoto no GitHub com Octokit
   if (!octokit) {
     return {
       success: true,
       githubUpdated: false,
-      message: "Ficheiro atualizado localmente. GitHub Token não configurado para push remoto."
+      message: 'Ficheiro atualizado localmente. GitHub Token não configurado para push remoto.'
     };
   }
 
   try {
-    const cleanRepoPath = relativePath.replace(/\\/g, "/").replace(/^\.\//, "");
-    
-    // Obter o SHA do ficheiro atual no GitHub
+    const cleanRepoPath = relativePath.replace(/\\/g, '/').replace(/^\.\//, '');
     let currentSha = null;
     try {
       const { data } = await octokit.rest.repos.getContent({
@@ -136,12 +172,9 @@ export async function commitAndPushFix({ relativePath, newContent, commitMessage
         path: cleanRepoPath
       });
       currentSha = data.sha;
-    } catch (notFound) {
-      // O ficheiro pode ser novo
-    }
+    } catch {}
 
-    // Criar ou atualizar o ficheiro no repositório
-    const contentBase64 = Buffer.from(newContent, "utf-8").toString("base64");
+    const contentBase64 = Buffer.from(newContent, 'utf-8').toString('base64');
     const updateRes = await octokit.rest.repos.createOrUpdateFileContents({
       owner: GITHUB_OWNER,
       repo: GITHUB_REPO,
@@ -150,8 +183,8 @@ export async function commitAndPushFix({ relativePath, newContent, commitMessage
       content: contentBase64,
       sha: currentSha || undefined,
       committer: {
-        name: "Self-Refine Agent",
-        email: "bot-autofix@antigravity.ai"
+        name: 'Self-Refine Agent',
+        email: 'bot-autofix@antigravity.ai'
       }
     });
 
@@ -160,46 +193,34 @@ export async function commitAndPushFix({ relativePath, newContent, commitMessage
       githubUpdated: true,
       commitSha: updateRes.data.commit.sha,
       commitUrl: updateRes.data.commit.html_url,
-      message: `Correção autónoma enviada para o GitHub com sucesso (SHA: ${updateRes.data.commit.sha.substring(0, 7)}).`
+      message: `Correção enviada para GitHub (SHA: ${updateRes.data.commit.sha.substring(0, 7)}).`
     };
   } catch (octoErr) {
     return {
       success: true,
       githubUpdated: false,
-      message: `Ficheiro corrigido no servidor local, mas falha no GitHub: ${octoErr.message}`
+      message: `Ficheiro corrigido localmente, mas falha no GitHub: ${octoErr.message}`
     };
   }
 }
 
-/**
- * Pipeline Integrado de Auto-Melhoramento: Diagnostica, Aplica Fix e Faz Push
- */
-export async function autoRefineWorkflow({ serviceName, error, filePath }) {
-  // 1. Trap do erro
+export async function autoRefineWorkflow({ serviceName, error, filePath, completionFn }) {
   const report = recordExecutionError({ serviceName, error, context: { filePath } });
-
-  // 2. Diagnóstico e proposta de código
-  console.log(`🧠 [SELF-REFINE] A analisar código-fonte de ${filePath}...`);
   const diagnosis = await diagnoseAndRefineError({
     filePath,
-    errorMessage: error.message,
-    errorStack: error.stack
+    errorMessage: error?.message || String(error),
+    errorStack: error?.stack,
+    completionFn
   });
 
   if (!diagnosis.success) {
-    return {
-      reportId: report.id,
-      repaired: false,
-      error: diagnosis.error
-    };
+    return { reportId: report.id, repaired: false, error: diagnosis.error };
   }
 
-  // 3. Commit no GitHub
-  console.log(`🚀 [SELF-REFINE] Correção validada ("${diagnosis.summary}"). A comitar no GitHub...`);
   const commitRes = await commitAndPushFix({
     relativePath: filePath,
     newContent: diagnosis.patchedCode,
-    commitMessage: `🤖 [Self-Refine] Correção autónoma em ${path.basename(filePath)}: ${diagnosis.summary}`
+    commitMessage: `🤖 [Self-Refine] Correção em ${path.basename(filePath)}: ${diagnosis.summary}`
   });
 
   return {
@@ -211,3 +232,11 @@ export async function autoRefineWorkflow({ serviceName, error, filePath }) {
   };
 }
 
+export default {
+  recordExecutionError,
+  getErrorStatusMarkdown,
+  resolveOpenErrors,
+  diagnoseAndRefineError,
+  commitAndPushFix,
+  autoRefineWorkflow
+};

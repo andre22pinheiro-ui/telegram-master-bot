@@ -17,8 +17,8 @@ export const FLEET_REDIRECT_MSG =
 
 // Regra de redirecionamento restrito de frota/trabalho
 const WORK_FLEET_PATTERNS = [
-  /^\/(frota|frotas|veiculos|viaturas|rota|tacografo|appfrota)\b/i,
-  /\b(appfrota|zeropaperfrota|rotabus|tac[oó]grafo|ce\s*561\/2006|condu[cç][aã]o\s+cont[ií]nua)\b/i,
+  /^\/(frota|frotas|veiculos|viaturas|rota|tacografo|appfrota|tcc|gsr2)\b/i,
+  /\b(appfrota|zeropaperfrota|rotabus|tac[oó]grafo|ce\s*561\/2006|condu[cç][aã]o\s+cont[ií]nua|smart\s*tacho|gsr2|lei\s*13\/2006|carrinha\s+escolar|ufcd-tcc)\b/i,
   /\b(?:autocarro|cami[aã]o|viatura|frota)\b.*\b(?:avaria|trav[oõ]es|km|od[oó]metro|revis[aã]o|oficina|higieniza[cç][aã]o|lavagem|checklist|manuten[cç][aã]o|[a-z0-9]{2}-[a-z0-9]{2}-[a-z0-9]{2})\b/i,
   /\b(?:avaria|manuten[cç][aã]o|revis[aã]o|checklist|higieniza[cç][aã]o)\b.*\b(?:autocarro|cami[aã]o|viatura|frota)\b/i,
   /\bmatr[ií]cula\s+[a-z0-9]{2}-[a-z0-9]{2}-[a-z0-9]{2}\b/i
@@ -34,12 +34,12 @@ const PATTERNS = {
     /\b(moradia|apartamento|im[oó]vel|imobili[aá]ri|idealista|imovirtual|cmvm|standvirtual|piscapisca|carmine|pcdiga|globaldata|pccomponentes|wallapop|amazon\.es|segunda\s+mano|iphone|macbook|recondicionad|grau\s+a|iservices|swappie|back\s*market)\b/i
   ],
   DEV: [
-    /^\/(code|projetos?|criar_app|deploy|apps?|apks?|status_cloud|status_nuvem|print|screenshot|pc|pc_status|hardware|pc_sistema|compilar|build)\b/i,
-    /\b(c[oó]digo|bug|erro|node\.?js|react|github(?:\s+actions)?|vercel|render|cloud\s*status|status\s+da\s+nuvem|telemetria\s+cloud|webhook|pc\s*surface|screenshot|ecr[aã]|compilar\s+apk)\b/i
+    /^\/(code|projetos?|criar_app|deploy|apps?|apks?|status_cloud|status_nuvem|print|screenshot|pc|pc_status|hardware|pc_sistema|compilar|build|pladur|erros?|self_refine)\b/i,
+    /\b(c[oó]digo|bug|erro|node\.?js|react|github(?:\s+actions)?|vercel|render|cloud\s*status|status\s+da\s+nuvem|telemetria\s+cloud|webhook|pc\s*surface|screenshot|ecr[aã]|compilar\s+apk|pladur|en\s*520|en\s*14195|divis[oó]ria|self[-\s]?refine)\b/i
   ],
   GERAL: [
-    /^\/(noticias|noticia|news|europa|noticias_regiao|amarante|governo|leis|farmacias?|compras?|tarefas?|carolina|nota|notas|lembrete|lembretes|briefing|resumo|emails?|ler_email|resumo_email|email_status|pesquisa|google|combustiveis|gasoleo|gasolina|transito|tv|programacao)\b/i,
-    /\b(not[ií]cias?|di[aá]rio\s+da\s+rep[uú]blica|portugal\.gov|ipma|prociv|farm[aá]cias?|email|inbox|correio|compras|supermercado|tarefa|carolina|escola|lembra-me|lembrar|daqui a \d+|amanh[aã]\s+[aà]s|nota:|combust[ií]veis|gas[oó]leo|tr[aâ]nsito)\b/i
+    /^\/(noticias|noticia|news|europa|noticias_regiao|amarante|governo|leis|codigo_estrada|sri|cadeirinha|dl84|agenda|evento|mapa|amarante_mapa|ergonomia|farmacias?|compras?|tarefas?|carolina|nota|notas|lembrete|lembretes|briefing|resumo|emails?|ler_email|resumo_email|email_status|pesquisa|google|combustiveis|gasoleo|gasolina|transito|tv|programacao)\b/i,
+    /\b(not[ií]cias?|di[aá]rio\s+da\s+rep[uú]blica|portugal\.gov|ipma|prociv|farm[aá]cias?|email|inbox|correio|compras|supermercado|tarefa|carolina|escola|lembra-me|lembrar|daqui a \d+|amanh[aã]\s+[aà]s|nota:|combust[ií]veis|gas[oó]leo|tr[aâ]nsito|cadeirinha|c[oó]digo\s+da\s+estrada|dl\s*84\/2021)\b/i
   ]
 };
 

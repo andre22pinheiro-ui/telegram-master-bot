@@ -6,6 +6,9 @@ import { searchLiveWeb } from '../shared/webSearch.js';
 import { getEmailBriefing, fetchRecentEmails, summarizeEmailWithAI, getEmailStatus } from '../services/emailService.js';
 import { obterPostosMaisBaratos, formatarCombustiveisMarkdown } from '../services/combustiveisService.js';
 import { getDailyNewsBriefing, getRegionalNews, getGovNews } from '../services/newsService.js';
+import { consultPersonalLaw } from '../services/personalLawService.js';
+import { generateGoogleCalendarUrl, parseAgendaEventPhrase } from '../services/calendarHelperService.js';
+import { amaranteMapService } from '../services/amaranteMapService.js';
 
 const log = createLogger('WorkerGeral');
 
@@ -202,11 +205,14 @@ function handleNutricao() {
 }
 
 function handleErgonomia() {
-  return `🏋️ *Diretrizes de Ergonomia, Postura & Coluna*\n\n` +
-    `• *Lombar:* Apoio lombar ativo a 105º-110º de inclinação.\n` +
-    `• *Pescoço & Olhos:* Topo do monitor exatamente na linha direta dos olhos.\n` +
-    `• *Pausa Ativa:* A cada 2 horas de condução ou código, 5 minutos de descompressão.\n` +
-    `• *Hidratação:* Mínimo de 2.5 Litros de água por dia.`;
+  return (
+    `🏋️ *Diretrizes de Ergonomia, Postura & Recuperação*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `• *Lombar & Anca:* Ângulo da anca entre *100º e 110º*, com apoio lombar firme na curvatura L1-L5 e pés apoiados.\n` +
+    `• *Pescoço & Olhos:* Topo do monitor alinhado com os olhos (evitar flexão cervical).\n` +
+    `• *Pausa Ativa:* A cada 2 horas de trabalho contínuo, 5 minutos de extensão lombar de pé e mobilidade da anca.\n` +
+    `• *Hidratação:* Regra *35 ml/kg* por dia (mínimo de **2.5 Litros / 2500 ml** diários) + evitar ar condicionado direto nas costas.`
+  );
 }
 
 function handleProteina(input) {
@@ -344,8 +350,68 @@ function handleLembretes(rawInput, ctx) {
     minute: '2-digit',
     hour12: false
   });
+  const gcalUrl = generateGoogleCalendarUrl(parsed.text, parsed.triggerAt, 30);
 
-  return `🔔 *Lembrete Proativo Agendado!*\n━━━━━━━━━━━━━━━━━━━━━━━━\n⏰ *Quando:* ${formattedDate}\n📋 *Assunto:* _"${parsed.text}"_\n━━━━━━━━━━━━━━━━━━━━━━━━\n_O bot enviará uma notificação push direta para este chat no momento exato._`;
+  return (
+    `🔔 *Lembrete Proativo Agendado!*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `⏰ *Quando:* ${formattedDate}\n` +
+    `📋 *Assunto:* _"${parsed.text}"_\n` +
+    `📅 [Adicionar ao Google Calendar](${gcalUrl})\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `_O bot enviará uma notificação push direta para este chat no momento exato._`
+  );
+}
+
+function handleAgenda(rawInput, ctx) {
+  const input = (rawInput || '').trim();
+  const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
+  const user = { first_name: ctx.from?.first_name || 'André', username: ctx.from?.username };
+
+  if (!input || /^(ver|listar)$/i.test(input)) {
+    const pending = (sqliteMasterDb.getReminders() || [])
+      .filter((r) => !r.sent)
+      .sort((a, b) => new Date(a.trigger_at) - new Date(b.trigger_at));
+    const listText =
+      pending.length > 0
+        ? pending
+            .slice(0, 8)
+            .map((r, idx) => {
+              const dt = new Date(r.trigger_at).toLocaleString('pt-PT', { timeZone: 'Europe/Lisbon', hour12: false });
+              return `${idx + 1}. 📅 *${dt}* — ${r.text}`;
+            })
+            .join('\n')
+        : '_Nenhum compromisso futuro agendado._';
+
+    return (
+      `📅 *AGENDA PESSOAL & GOOGLE CALENDAR*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `${listText}\n\n` +
+      `💡 *Novo compromisso:* \`/agenda amanhã às 15h Pediatra Carolina\``
+    );
+  }
+
+  const parsed = parseAgendaEventPhrase(input);
+  if (!parsed) {
+    return `❌ Formato inválido. Exemplo: \`/agenda amanhã às 15:30 Consulta Dentista\``;
+  }
+
+  sqliteMasterDb.addReminder({
+    text: parsed.title,
+    triggerAt: parsed.startDate.toISOString(),
+    chatId,
+    user
+  });
+  const gcalUrl = generateGoogleCalendarUrl(parsed.title, parsed.startDate, 60);
+
+  return (
+    `📅 *COMPROMISSO REGISTADO NA AGENDA*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📌 *Evento:* ${parsed.title}\n` +
+    `🗓️ *Data:* ${parsed.date} às *${parsed.time}*\n` +
+    `🔔 *Alerta Telegram:* Ativado\n` +
+    `🔗 [Abrir no Google Calendar](${gcalUrl})`
+  );
 }
 
 // ─── Dispatcher Principal ───────────────────────────────────────────────────
@@ -370,8 +436,22 @@ export async function handle(text, ctx = {}) {
   if (/^\/(noticias_regiao|amarante)\b/i.test(trimmed)) {
     return await getRegionalNews();
   }
-  if (/^\/(governo|leis)\b/i.test(trimmed)) {
+  if (/^\/governo\b/i.test(trimmed)) {
     return await getGovNews();
+  }
+  if (/^\/leis\s*$/i.test(trimmed)) {
+    return await getGovNews();
+  }
+  if (/^\/(leis\s+.+|codigo_estrada|sri|cadeirinha|dl84)\b/i.test(trimmed)) {
+    return consultPersonalLaw(trimmed);
+  }
+  if (/^\/(mapa|amarante_mapa)\b/i.test(trimmed)) {
+    const q = trimmed.replace(/^\/(mapa|amarante_mapa)\s*/i, '').trim();
+    return amaranteMapService.formatSummary(q);
+  }
+  if (/^\/(agenda|evento)\b/i.test(trimmed)) {
+    const q = trimmed.replace(/^\/(agenda|evento)\s*/i, '').trim();
+    return handleAgenda(q, ctx);
   }
   if (/^\/noticias?\b/i.test(trimmed) || /\b([uú]ltimas\s+not[ií]cias|not[ií]cias\s+de\s+hoje|briefing\s+not[ií]cias)\b/i.test(trimmed)) {
     return await getDailyNewsBriefing();
