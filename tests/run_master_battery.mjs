@@ -774,8 +774,9 @@ async function main() {
 
       let reusedSetCalls = 0;
       const reuseBot = {
-        webhookCallback: (p) => () => p,
+        webhookCallback: () => async () => { throw new Error('Simulated Telegraf failure'); },
         telegram: {
+          getMe: async () => ({ id: 42, is_bot: true, username: 'MasterReuseBot' }),
           getWebhookInfo: async () => ({ url: 'https://telegram-master-bot-0h2h.onrender.com/webhook/master' }),
           setWebhook: async () => { reusedSetCalls++; }
         }
@@ -790,6 +791,15 @@ async function main() {
         sleepFn: async () => {}
       });
       assert(res2.reused === true && reusedSetCalls === 0, 'Deve reutilizar webhook já registado sem chamar setWebhook');
+      assert(reuseBot.botInfo?.username === 'MasterReuseBot', 'mountBotTransport deve pré-carregar botInfo via getMe');
+
+      let statusWritten = 0;
+      await callbacks.get('/webhook/master')({}, {
+        headersSent: false,
+        writeHead: (code) => { statusWritten = code; },
+        end: () => {}
+      });
+      assert(statusWritten === 500, 'Erro síncrono/assíncrono no webhookCallback deve devolver 500 sem derrubar o servidor Node');
     });
   } finally {
     sqliteMasterDb.close();

@@ -365,7 +365,24 @@ export async function mountBotTransport({
 }) {
   if (renderUrl && !usePolling) {
     const webhookUrl = `${renderUrl.replace(/\/$/, '')}${webhookPath}`;
-    webhookCallbacks.set(webhookPath, targetBot.webhookCallback(webhookPath));
+    const rawCallback = targetBot.webhookCallback(webhookPath);
+    webhookCallbacks.set(webhookPath, (req, res) =>
+      Promise.resolve(rawCallback(req, res)).catch((err) => {
+        log.error(`Erro não tratado no webhook [${name}]:`, err?.message || err);
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Webhook processing error' }));
+        }
+      })
+    );
+
+    if (!targetBot.botInfo && typeof targetBot.telegram.getMe === 'function') {
+      try {
+        targetBot.botInfo = await targetBot.telegram.getMe();
+      } catch (err) {
+        log.warn(`Aviso getMe [${name}]: ${err?.message || err}`);
+      }
+    }
 
     try {
       const info = await targetBot.telegram.getWebhookInfo().catch(() => null);
