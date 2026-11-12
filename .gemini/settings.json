@@ -1,0 +1,26 @@
+{
+    "mcpServers":  {
+                       "supabase":  {
+                                        "command":  "npx",
+                                        "args":  [
+                                                     "--no-install",
+                                                     "@supabase/mcp-server-supabase",
+                                                     "--read-only",
+                                                     "--project-ref=bwibtpcunojmtnrnqpvg"
+                                                 ],
+                                        "env":  {
+                                                    "SUPABASE_ACCESS_TOKEN":  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ3aWJ0cGN1bm9qbXRucm5xcHZnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4OTQxMDM3MywiZXhwIjoyMTA0OTg2MzczfQ.E7GEnfUf8TWnw3e0BN3mN_3tpzPN8nvcvjXv-5DwKYA"
+                                                }
+                                    },
+                       "telegram-dev":  {
+                                            "command":  "npx",
+                                            "args":  [
+                                                         "-y",
+                                                         "telegram-bot-mcp"
+                                                     ],
+                                            "env":  {
+                                                        "TELEGRAM_BOT_TOKEN":  "8593064696:AAGMqVhJPaam2IAeyr90wCnXyqsN8WRJ0sE"
+                                                    }
+                                        }
+                   }
+}

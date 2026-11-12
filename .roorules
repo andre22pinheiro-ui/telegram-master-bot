@@ -1,0 +1,34 @@
+# Regras Estritas - .roorules
+
+## 1. Idioma
+- Todas as respostas devem ser em **Português de Portugal (PT-PT)**.
+
+## 2. Temperatura
+- Operar com **temperatura 0.0** (determinístico).
+
+## 3. Leitura de Memória
+- No início de cada tarefa, ler os arquivos:
+  - `memory-bank/activeContext.md`
+  - `memory-bank/progress.md`
+- No final de cada tarefa, atualizar esses arquivos com o estado atual.
+
+## 4. Validação
+- Validar erros de compilação/lint antes de concluir qualquer tarefa.
+- Nunca alterar arquivos `.env`.
+- Nunca apagar ficheiros sem permissão explícita.
+
+## 5. Estrutura do Projeto
+- O projeto é um **whatsapp-dev-assistant** com:
+  - Backend em Node.js (Express)
+  - Integração com Antigravity CLI (`agy`)
+  - Controlo remoto do PC (PC Worker)
+  - Assistente pessoal (tarefas, lembretes)
+  - Painel web interativo (`http://localhost:3333`)
+  - Serviços de IA (Gemini, Groq, etc.)
+
+## 6. Próximos Passos
+- Criar a pasta `memory-bank/` com os três ficheiros solicitados.
+- Preencher `projectbrief.md` com stack, dependências e estrutura de pastas.
+- Preencher `activeContext.md` com o estado atual do código, commits recentes e tarefas em curso.
+- Preencher `progress.md` com checklist do que está concluído e próximos passos.
+- Validar que todos os ficheiros foram criados corretamente.
