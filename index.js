@@ -672,7 +672,7 @@ const legacyBridges = createLegacyBridgeBots({
 
 const webhookCallbacks = new Map();
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   const urlPath = (req.url || '/').split('?')[0];
 
   if (urlPath === '/webapp' || urlPath === '/mini-app' || urlPath === '/app' || (urlPath === '/' && req.headers.accept?.includes('text/html'))) {
