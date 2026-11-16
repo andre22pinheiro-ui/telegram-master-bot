@@ -9,6 +9,7 @@ import { applyHindsightMigration } from './migrations/hindsightMigration.js';
 import { applyAgentReachMigration } from './migrations/agentReachMigration.js';
 import { applyHomeAssistantMigration } from './migrations/homeAssistantMigration.js';
 import { applyIaNutricionistaMigration } from './migrations/iaNutricionistaMigration.js';
+import { applyNotebookLmMigration } from './migrations/notebookLmMigration.js';
 
 const log = createLogger('SqliteMasterDb');
 
@@ -414,6 +415,7 @@ export function getMasterDb() {
   applyAgentReachMigration(db);
   applyHomeAssistantMigration(db);
   applyIaNutricionistaMigration(db);
+  applyNotebookLmMigration(db);
   migrateLegacyDataIfNeeded(db, targetPath);
 
   dbInstance = db;
@@ -1491,6 +1493,175 @@ export const sqliteMasterDb = {
   listDietTips() {
     const db = getMasterDb();
     return db.prepare('SELECT * FROM nutrition_diet_tips ORDER BY id ASC').all();
+  },
+
+  // ─── NOTEBOOKLM: CADERNOS E FONTES DE CONHECIMENTO ─────────────────────────
+  createNotebook({ title, description = '', userId = 'default_user' }) {
+    const cleanTitle = String(title || '').trim();
+    if (!cleanTitle) throw new Error('O título do caderno é obrigatório.');
+    const db = getMasterDb();
+    const id = `nb_${generateId()}`;
+    const now = new Date().toISOString();
+
+    db.prepare(`
+      INSERT INTO notebooks (id, user_id, title, description, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, String(userId), cleanTitle, String(description || '').trim(), now, now);
+
+    notifyDriveSync();
+    return this.getNotebook(id, userId);
+  },
+
+  listNotebooks(userId = 'default_user') {
+    const db = getMasterDb();
+    return db.prepare(`
+      SELECT n.*,
+             COUNT(s.id) AS sources_count,
+             COALESCE(SUM(s.word_count), 0) AS total_words
+      FROM notebooks n
+      LEFT JOIN notebook_sources s ON n.id = s.notebook_id
+      WHERE n.user_id = ?
+      GROUP BY n.id
+      ORDER BY n.updated_at DESC
+    `).all(String(userId));
+  },
+
+  getNotebook(notebookIdOrTitle, userId = 'default_user') {
+    if (!notebookIdOrTitle) return null;
+    const db = getMasterDb();
+    const clean = String(notebookIdOrTitle).trim();
+    const row = db.prepare(`
+      SELECT n.*,
+             COUNT(s.id) AS sources_count,
+             COALESCE(SUM(s.word_count), 0) AS total_words
+      FROM notebooks n
+      LEFT JOIN notebook_sources s ON n.id = s.notebook_id
+      WHERE (n.id = ? OR (n.user_id = ? AND LOWER(n.title) = LOWER(?)))
+      GROUP BY n.id
+    `).get(clean, String(userId), clean);
+
+    return row || null;
+  },
+
+  deleteNotebook(notebookIdOrTitle, userId = 'default_user') {
+    const target = this.getNotebook(notebookIdOrTitle, userId);
+    if (!target) return false;
+
+    const db = getMasterDb();
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM notebook_sources WHERE notebook_id = ?').run(target.id);
+      db.prepare('DELETE FROM notebooks WHERE id = ?').run(target.id);
+    });
+    tx();
+
+    notifyDriveSync();
+    return true;
+  },
+
+  addNotebookSource(notebookId, { title, sourceType = 'text', content, url = null }) {
+    if (!notebookId) throw new Error('O ID do caderno é obrigatório.');
+    const cleanContent = String(content || '').trim();
+    if (!cleanContent) throw new Error('O conteúdo da fonte é obrigatório.');
+    const cleanTitle = String(title || (url ? new URL(url).hostname : 'Nota de Texto')).trim();
+
+    const db = getMasterDb();
+    const id = `src_${generateId()}`;
+    const now = new Date().toISOString();
+    const wordCount = cleanContent.split(/\s+/).filter(Boolean).length;
+
+    const tx = db.transaction(() => {
+      db.prepare(`
+        INSERT INTO notebook_sources (id, notebook_id, title, source_type, content, url, word_count, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, notebookId, cleanTitle, String(sourceType || 'text'), cleanContent, url ? String(url).trim() : null, wordCount, now, now);
+
+      db.prepare('UPDATE notebooks SET updated_at = ? WHERE id = ?').run(now, notebookId);
+    });
+    tx();
+
+    notifyDriveSync();
+    return this.getNotebookSource(id);
+  },
+
+  getNotebookSources(notebookId) {
+    if (!notebookId) return [];
+    const db = getMasterDb();
+    return db.prepare(`
+      SELECT * FROM notebook_sources
+      WHERE notebook_id = ?
+      ORDER BY created_at ASC
+    `).all(notebookId);
+  },
+
+  getNotebookSource(sourceId) {
+    if (!sourceId) return null;
+    const db = getMasterDb();
+    return db.prepare('SELECT * FROM notebook_sources WHERE id = ?').get(sourceId) || null;
+  },
+
+  deleteNotebookSource(sourceId) {
+    if (!sourceId) return false;
+    const db = getMasterDb();
+    const source = this.getNotebookSource(sourceId);
+    if (!source) return false;
+
+    const now = new Date().toISOString();
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM notebook_sources WHERE id = ?').run(sourceId);
+      db.prepare('UPDATE notebooks SET updated_at = ? WHERE id = ?').run(now, source.notebook_id);
+    });
+    tx();
+
+    notifyDriveSync();
+    return true;
+  },
+
+  searchNotebookSources(notebookId = null, query = '') {
+    const cleanQuery = String(query || '').trim();
+    if (!cleanQuery) return [];
+    const db = getMasterDb();
+
+    try {
+      if (notebookId) {
+        return db.prepare(`
+          SELECT s.*,
+                 snippet(notebook_sources_fts, 2, '<b>', '</b>', '...', 25) AS snippet
+          FROM notebook_sources_fts f
+          JOIN notebook_sources s ON s.rowid = f.rowid
+          WHERE f.notebook_id = ? AND notebook_sources_fts MATCH ?
+          ORDER BY rank
+          LIMIT 10
+        `).all(notebookId, cleanQuery);
+      } else {
+        return db.prepare(`
+          SELECT s.*,
+                 snippet(notebook_sources_fts, 2, '<b>', '</b>', '...', 25) AS snippet
+          FROM notebook_sources_fts f
+          JOIN notebook_sources s ON s.rowid = f.rowid
+          WHERE notebook_sources_fts MATCH ?
+          ORDER BY rank
+          LIMIT 10
+        `).all(cleanQuery);
+      }
+    } catch {
+      // Fallback para LIKE se a query FTS tiver caracteres especiais
+      const pattern = `%${cleanQuery}%`;
+      if (notebookId) {
+        return db.prepare(`
+          SELECT * FROM notebook_sources
+          WHERE notebook_id = ? AND (title LIKE ? OR content LIKE ?)
+          ORDER BY updated_at DESC
+          LIMIT 10
+        `).all(notebookId, pattern, pattern);
+      } else {
+        return db.prepare(`
+          SELECT * FROM notebook_sources
+          WHERE title LIKE ? OR content LIKE ?
+          ORDER BY updated_at DESC
+          LIMIT 10
+        `).all(pattern, pattern);
+      }
+    }
   },
 
   // ─── ESTATÍSTICAS GERAIS & DIAGNÓSTICO ──────────────────────────────────────

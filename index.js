@@ -136,8 +136,8 @@ function getMasterKeyboard() {
     ],
     [
       Markup.button.callback('☁️ Status Cloud', 'act_status_cloud'),
-      Markup.button.callback('📺 TV IPTV', 'act_tv_menu'),
-      Markup.button.callback('💾 Drive SQLite', 'act_drive_status')
+      Markup.button.callback('🧠 NotebookLM', 'act_notebooklm'),
+      Markup.button.callback('📺 TV IPTV', 'act_tv_menu')
     ],
     [
       Markup.button.callback('☀️ Briefing Diário', 'act_briefing'),
@@ -282,6 +282,12 @@ bot.command('ajuda', async (ctx) => {
     `• \`/compras\` | \`/tarefas\` | \`/carolina\` | \`/nota\` | \`/lembrete\` | \`/agenda\` | \`/briefing\`\n` +
     `• \`/codigo_estrada\` | \`/sri\` | \`/dl84\` | \`/mapa\` | \`/ergonomia\`\n` +
     `• \`/emails\` | \`/ler_email N\` | \`/farmacias\` | \`/pesquisa\` | \`/combustiveis\` | \`/transito\` | \`/tv\` | \`/apps\`\n\n` +
+    `*🧠 NotebookLM (Grounded Q&A, Fontes FTS5 & Audio Overview):*\n` +
+    `• \`/notebook\` | \`/notebooks\` | \`/caderno\` — Gestão de cadernos de conhecimento\n` +
+    `• \`/notebook criar <nome>\` | \`/notebook adicionar <caderno> <url/texto>\`\n` +
+    `• \`/notebook perguntar <caderno> <dúvida>\` — Resposta fundamentada com citações [Fonte X]\n` +
+    `• \`/podcast <caderno>\` — Podcast Deep Dive com Diogo & Inês\n` +
+    `• \`/estudo <caderno>\` — Resumo executivo, glossário e autoavaliação\n\n` +
     `*☁️ DevOps 100% Cloud & Engenharia (Render + GitHub Actions + Drive):*\n` +
     `• \`/status_cloud\` | \`/compilar <repo>\` | \`/projetos\` | \`/criar_app\` | \`/pladur [m2]\` | \`/erros\` | \`/drive\``;
 
@@ -379,6 +385,11 @@ bot.command(['projetos', 'criar_app', 'compilar', 'build', 'status_cloud', 'stat
   await sendReply(ctx, reply);
 });
 
+bot.command(['notebook', 'notebooks', 'notebooklm', 'caderno', 'cadernos', 'podcast', 'estudo'], async (ctx) => {
+  await ctx.sendChatAction('typing');
+  await sendReply(ctx, await handleDev(ctx.message.text, ctx));
+});
+
 bot.command(['apps', 'app', 'catalogo', 'vercel'], async (ctx) => {
   await sendReply(ctx, formatAllVercelAppsMarkdown(), buildTelegramAppsKeyboard());
 });
@@ -453,6 +464,10 @@ bot.action('act_status_cloud', async (ctx) => {
 bot.action('act_dev', async (ctx) => {
   await ctx.answerCbQuery();
   await sendReply(ctx, await handleDev('/projetos', ctx));
+});
+bot.action('act_notebooklm', async (ctx) => {
+  await ctx.answerCbQuery('🧠 NotebookLM Cadernos...');
+  await sendReply(ctx, await handleDev('/notebook', ctx));
 });
 
 // ─── Callbacks Inline ────────────────────────────────────────────────────────

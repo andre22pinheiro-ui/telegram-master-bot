@@ -804,6 +804,96 @@ async function main() {
       assert(bebeOut.includes('MONITOR DE CONFORTO: QUARTO DA CAROLINA') && bebeOut.includes('Temperatura Atual'), '/carolina_quarto deve exibir métricas');
     });
 
+    await runTest('DEV-10', 'NotebookLM: Grounded Q&A, Cadernos FTS5, Podcast Audio Overview e Guia de Estudo', async () => {
+      const { default: notebookService } = await import('../src/services/notebookLmService.js');
+      const ctx = { chat: { id: 950415577 }, from: { id: 950415577, first_name: 'André' } };
+      const testUser = 'user_notebook_test';
+
+      // 1. Criar Caderno e Anexar Fontes
+      const nb = notebookService.getOrCreateNotebook('Arquitetura Cloud', testUser, 'Notas sobre resiliência e persistência');
+      assert(nb.title === 'Arquitetura Cloud' && nb.id.startsWith('nb_'), 'Caderno deve ser criado com ID persistente');
+
+      const s1 = await notebookService.addSourceToNotebook(nb.id, 'O SQLite WAL com sincronização Google Drive write-through assegura persistência a cada 5 segundos.', {
+        title: 'SQLite Persistência',
+        userId: testUser
+      });
+      assert(s1.source.title === 'SQLite Persistência' && s1.source.word_count > 5, 'Fonte deve ser gravada com contagem de palavras');
+
+      const s2 = await notebookService.addSourceToNotebook(nb.id, 'O Render suspende instâncias inativas no plano free mas corre 24/7 em background workers com zero downtime.', {
+        title: 'Render Cloud Specs',
+        userId: testUser
+      });
+      assert(s2.source.title === 'Render Cloud Specs', 'Segunda fonte deve ser anexada');
+
+      // 2. Pesquisa FTS5 nas fontes
+      const searchRes = notebookService.searchSources('sincronização', nb.id, testUser);
+      assert(searchRes.length > 0 && searchRes[0].title === 'SQLite Persistência', 'FTS5 deve encontrar termo nas fontes');
+
+      // 3. Grounded Q&A determinístico (temperature: 0.0)
+      let qaPromptVerified = false;
+      const mockQaCompletion = async ({ systemPrompt, prompt }) => {
+        qaPromptVerified = systemPrompt.includes('temperature=0.0') && prompt.includes('[Fonte 1: "SQLite Persistência"');
+        return { text: 'O SQLite sincroniza a cada 5 segundos para o Drive [Fonte 1: SQLite Persistência].' };
+      };
+
+      const qaRes = await notebookService.askGroundedNotebook(nb.id, 'Qual é o intervalo de sincronização do SQLite?', {
+        userId: testUser,
+        completionFn: mockQaCompletion
+      });
+      assert(qaRes.success && qaPromptVerified && qaRes.answer.includes('[Fonte 1: SQLite Persistência]'), 'Grounded Q&A deve fundamentar com citação estrita');
+
+      // 4. Audio Overview / Podcast Script com 2 apresentadores
+      let podcastPromptVerified = false;
+      const mockPodcastCompletion = async ({ systemPrompt, prompt }) => {
+        podcastPromptVerified = systemPrompt.includes('Diogo') && systemPrompt.includes('Inês') && prompt.includes('Arquitetura Cloud');
+        return {
+          text:
+            '🎙️ Diogo: Bem-vindos ao nosso deep dive sobre a Arquitetura Cloud!\n' +
+            '🎙️ Inês: Olá a todos! Fiquei impressionada com o detalhe da persistência em SQLite WAL.\n' +
+            '🎙️ Diogo: De facto, com o Google Drive write-through a cada 5 segundos garantimos zero perda de dados.\n' +
+            '🎙️ Inês: Uma solução verdadeiramente elegante para o bot pessoal.'
+        };
+      };
+
+      const podcastRes = await notebookService.generateAudioOverview(nb.id, {
+        userId: testUser,
+        completionFn: mockPodcastCompletion
+      });
+      assert(podcastRes.success && podcastPromptVerified && podcastRes.script.includes('🎙️ Diogo:') && podcastRes.script.includes('🎙️ Inês:'), 'Podcast Overview deve conter diálogo entre Diogo e Inês');
+
+      // 5. Guia de Estudo e Autoavaliação
+      const mockStudyCompletion = async () => ({
+        text: '📌 *RESUMO EXECUTIVO*\nArquitetura resiliente.\n\n💡 *CONCEITOS-CHAVE*\n• SQLite WAL.\n\n📝 *QUIZ*\n1. Como persiste o bot?\nResposta: SQLite WAL.'
+      });
+      const studyRes = await notebookService.generateStudyGuide(nb.id, {
+        userId: testUser,
+        completionFn: mockStudyCompletion
+      });
+      assert(studyRes.success && studyRes.guide.includes('RESUMO EXECUTIVO') && studyRes.guide.includes('CONCEITOS-CHAVE'), 'Guia de estudo deve ter blocos obrigatórios');
+
+      // 6. Comandos no Worker Dev e Router
+      const menuHelp = await workerDev.handle('/notebook', ctx);
+      assert(menuHelp.includes('NOTEBOOKLM'), '/notebook deve devolver menu ou lista de cadernos');
+
+      const createViaWorker = await workerDev.handle('/notebook criar NutricaoDesportiva Caderno sobre dieta', ctx);
+      assert(createViaWorker.includes('Caderno Criado com Sucesso') && createViaWorker.includes('NutricaoDesportiva'), '/notebook criar deve registar caderno');
+
+      const addViaWorker = await workerDev.handle('/notebook adicionar NutricaoDesportiva Consumir 160g de proteína e 5g de creatina diárias', ctx);
+      assert(addViaWorker.includes('Fonte Anexada') && addViaWorker.includes('Palavras Indexadas'), '/notebook adicionar deve indexar texto');
+
+      const podcastViaWorker = await workerDev.handle('/podcast NutricaoDesportiva', { ...ctx, completionFn: mockPodcastCompletion });
+      assert(podcastViaWorker.includes('AUDIO OVERVIEW') && podcastViaWorker.includes('Diogo:'), '/podcast deve invocar gerador de diálogo');
+
+      const estudoViaWorker = await workerDev.handle('/estudo NutricaoDesportiva', { ...ctx, completionFn: mockStudyCompletion });
+      assert(estudoViaWorker.includes('GUIA DE ESTUDO') && estudoViaWorker.includes('NutricaoDesportiva'), '/estudo deve invocar guia de autoavaliação');
+
+      // 7. Intenções no Router
+      assert(detectIntent('/notebook') === 'DEV', '/notebook deve ser detetado como DEV');
+      assert(detectIntent('/podcast') === 'DEV', '/podcast deve ser detetado como DEV');
+      assert(detectIntent('/estudo') === 'DEV', '/estudo deve ser detetado como DEV');
+      assert(detectIntent('quero ouvir o podcast deep dive das notas') === 'DEV', 'Frase sobre podcast deep dive deve ser DEV');
+    });
+
     await runTest('RADAR-02', 'Atalhos diretos /vigiar_amazon e /vigiar_apple criam filtros dedicados', async () => {
       const ctx = { chat: { id: 950415577 }, from: { id: 950415577, first_name: 'André' } };
       const amOut = await workerImmo.handle('/vigiar_amazon Garmin Forerunner 250', ctx);
@@ -1178,7 +1268,7 @@ async function main() {
       assert(cloudStat.includes('STATUS CLOUD-NATIVE') && cloudStat.includes('16 tabelas') && cloudStat.includes('Self-Refine'), 'Status Cloud deve manter contrato e reportar Self-Refine');
 
       const idxSrc = fs.readFileSync(path.join(ROOT_DIR, 'index.js'), 'utf-8');
-      for (const cmd of ["'pladur'", "'erros'", "'agenda'", "'mapa'", "'codigo_estrada'", "'sri'", "'dl84'"]) {
+      for (const cmd of ["'pladur'", "'erros'", "'agenda'", "'mapa'", "'codigo_estrada'", "'sri'", "'dl84'", "'notebook'", "'podcast'"]) {
         assert(idxSrc.includes(cmd), `index.js deve registar comando ${cmd}`);
       }
       const yamlSrc = fs.readFileSync(path.join(ROOT_DIR, 'render.yaml'), 'utf-8');

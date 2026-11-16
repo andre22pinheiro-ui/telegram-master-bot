@@ -29,6 +29,7 @@ import hindsightMemoryService from '../services/hindsightMemoryService.js';
 import nomadKnowledgeService from '../services/nomadKnowledgeService.js';
 import agentReachService from '../services/agentReachService.js';
 import homeAssistantService from '../services/homeAssistantService.js';
+import notebookLmService from '../services/notebookLmService.js';
 
 const log = createLogger('WorkerDevCloud');
 
@@ -275,6 +276,202 @@ export function handleGerarPromptIdeia(rawArgs = '') {
   );
 }
 
+export async function handleNotebookLm(text = '', opts = {}) {
+  const trimmed = String(text || '').trim();
+  const lower = trimmed.toLowerCase();
+  const userId = opts.chatId || opts.userId || process.env.CHAT_ID_AUTORIZADO || '950415577';
+
+  // 1. Atalho direto /podcast <caderno>
+  if (lower.startsWith('/podcast')) {
+    const target = trimmed.replace(/^\/podcast\s*/i, '').trim();
+    if (!target) {
+      return (
+        `🎙️ *NOTEBOOKLM — AUDIO OVERVIEW (PODCAST)*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `Gera um diálogo aprofundado entre 2 apresentadores (Diogo e Inês) em Português Europeu baseado nas tuas notas.\n\n` +
+        `💡 *Uso correto:*\n` +
+        `\`/podcast <nome_do_caderno>\`\n` +
+        `Exemplo: \`/podcast arquitetura\``
+      );
+    }
+    const res = await notebookLmService.generateAudioOverview(target, { userId, completionFn: opts.completionFn });
+    if (!res.success) return `⚠️ *Erro NotebookLM:* ${res.error}`;
+    return (
+      `🎙️ *NOTEBOOKLM AUDIO OVERVIEW — "${res.notebook.title}"*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📁 *Caderno:* ${res.notebook.title} (\`${res.sourcesCount}\` fontes analisadas)\n` +
+      `👥 *Apresentadores:* Diogo & Inês | ⏱️ _Roteiro Conversacional PT-PT_\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `${res.script}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `✅ _Síntese 100% fundamentada nas fontes do caderno (Zero Alucinações)._`
+    );
+  }
+
+  // 2. Atalho direto /estudo <caderno>
+  if (lower.startsWith('/estudo')) {
+    const target = trimmed.replace(/^\/estudo\s*/i, '').trim();
+    if (!target) {
+      return (
+        `📝 *NOTEBOOKLM — GUIA DE ESTUDO & QUIZ*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `Gera resumo executivo, glossário de conceitos-chave e perguntas de autoavaliação com base nas fontes.\n\n` +
+        `💡 *Uso correto:*\n` +
+        `\`/estudo <nome_do_caderno>\`\n` +
+        `Exemplo: \`/estudo medicina\``
+      );
+    }
+    const res = await notebookLmService.generateStudyGuide(target, { userId, completionFn: opts.completionFn });
+    if (!res.success) return `⚠️ *Erro NotebookLM:* ${res.error}`;
+    return (
+      `📚 *GUIA DE ESTUDO NOTEBOOKLM — "${res.notebook.title}"*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📁 *Caderno:* ${res.notebook.title} (\`${res.sourcesCount}\` fontes)\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `${res.guide}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `💡 _Para tirar dúvidas específicas sobre este caderno: \`/notebook perguntar ${res.notebook.title} <pergunta>\`_`
+    );
+  }
+
+  // 3. Atalhos /notebooks ou /cadernos
+  if (lower === '/notebooks' || lower === '/cadernos') {
+    return notebookLmService.formatNotebooksListMarkdown(userId);
+  }
+
+  // 4. Comandos /notebook, /notebooklm ou /caderno
+  const rawArgs = trimmed.replace(/^\/(?:notebooklm|notebook|caderno)\s*/i, '').trim();
+  if (!rawArgs) {
+    const nbs = notebookLmService.listUserNotebooks(userId);
+    if (nbs && nbs.length > 0) {
+      return notebookLmService.formatNotebooksListMarkdown(userId);
+    }
+    return notebookLmService.formatNotebookLmHelpMarkdown();
+  }
+
+  const parts = rawArgs.split(/\s+/);
+  const subCmd = parts[0]?.toLowerCase();
+
+  // /notebook listar
+  if (subCmd === 'listar' || subCmd === 'list' || subCmd === 'ver') {
+    return notebookLmService.formatNotebooksListMarkdown(userId);
+  }
+
+  // /notebook criar <nome> [descrição]
+  if (subCmd === 'criar' || subCmd === 'create' || subCmd === 'novo') {
+    const title = parts[1];
+    if (!title) return '⚠️ Indica o nome do caderno. Ex: `/notebook criar nutricao`';
+    const desc = parts.slice(2).join(' ') || '';
+    const nb = notebookLmService.getOrCreateNotebook(title, userId, desc);
+    return (
+      `📓 *Caderno Criado com Sucesso!*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `• *Nome:* *${nb.title}*\n` +
+      `• *ID:* \`${nb.id}\`\n` +
+      (nb.description ? `• *Descrição:* _${nb.description}_\n` : '') +
+      `\n💡 *Próximo passo — Adicionar fontes:*\n` +
+      `\`/notebook adicionar ${nb.title} <url ou texto>\``
+    );
+  }
+
+  // /notebook apagar <nome>
+  if (subCmd === 'apagar' || subCmd === 'eliminar' || subCmd === 'delete' || subCmd === 'remover') {
+    const title = parts.slice(1).join(' ').trim();
+    if (!title) return '⚠️ Indica o nome do caderno a apagar. Ex: `/notebook apagar nutricao`';
+    const ok = notebookLmService.deleteNotebook(title, userId);
+    if (!ok) return `⚠️ Caderno "${title}" não encontrado.`;
+    return `🗑️ *Caderno "${title}" e todas as suas fontes foram eliminados com sucesso.*`;
+  }
+
+  // /notebook fontes <caderno>
+  if (subCmd === 'fontes' || subCmd === 'sources') {
+    const title = parts.slice(1).join(' ').trim();
+    if (!title) return '⚠️ Indica o caderno para ver as fontes. Ex: `/notebook fontes nutricao`';
+    return notebookLmService.formatNotebookSourcesMarkdown(title, userId);
+  }
+
+  // /notebook adicionar <caderno> <url ou texto>
+  if (subCmd === 'adicionar' || subCmd === 'add' || subCmd === 'fonte') {
+    const title = parts[1];
+    if (!title) return '⚠️ Indica o caderno. Ex: `/notebook adicionar nutricao https://exemplo.com/artigo`';
+    const content = parts.slice(2).join(' ').trim();
+    if (!content) return '⚠️ Fornece o URL ou o texto da fonte a anexar.';
+
+    const res = await notebookLmService.addSourceToNotebook(title, content, { userId });
+    return (
+      `📥 *Fonte Anexada ao Caderno "${res.notebook.title}"!*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `• *Título da Fonte:* *${res.source.title}*\n` +
+      `• *Tipo:* \`${res.source.source_type.toUpperCase()}\`\n` +
+      `• *Palavras Indexadas (FTS5):* \`${res.source.word_count}\`\n` +
+      (res.source.url ? `• *URL:* ${res.source.url}\n` : '') +
+      `\n💡 *Experimenta agora:*\n` +
+      `• \`/notebook perguntar ${res.notebook.title} <tua dúvida>\`\n` +
+      `• \`/podcast ${res.notebook.title}\``
+    );
+  }
+
+  // /notebook perguntar <caderno> <pergunta> ou /notebook qa <caderno> <pergunta>
+  if (subCmd === 'perguntar' || subCmd === 'qa' || subCmd === 'pergunta' || subCmd === 'ask') {
+    const title = parts[1];
+    if (!title) return '⚠️ Indica o caderno. Ex: `/notebook perguntar nutricao quanta proteina consumir?`';
+    const question = parts.slice(2).join(' ').trim();
+    if (!question) return '⚠️ Escreve a pergunta sobre as fontes do caderno.';
+
+    const res = await notebookLmService.askGroundedNotebook(title, question, { userId, completionFn: opts.completionFn });
+    if (!res.success) return `⚠️ *Erro Grounded Q&A:* ${res.error}`;
+    return (
+      `🎯 *NOTEBOOKLM GROUNDED Q&A — "${res.notebook.title}"*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `❓ *Pergunta:* ${question}\n` +
+      `📚 *Fontes Consultadas:* \`${res.sourcesCount}\`\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `${res.answer}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🔒 _temperature: 0.0 | Rigor factual absoluto baseado nas fontes anexadas._`
+    );
+  }
+
+  // /notebook podcast <caderno>
+  if (subCmd === 'podcast' || subCmd === 'audio') {
+    const title = parts.slice(1).join(' ').trim();
+    if (!title) return '⚠️ Indica o caderno para gerar o podcast. Ex: `/notebook podcast nutricao`';
+    return await handleNotebookLm(`/podcast ${title}`, opts);
+  }
+
+  // /notebook estudo <caderno>
+  if (subCmd === 'estudo' || subCmd === 'resumo' || subCmd === 'guia') {
+    const title = parts.slice(1).join(' ').trim();
+    if (!title) return '⚠️ Indica o caderno para gerar o guia de estudo. Ex: `/notebook estudo nutricao`';
+    return await handleNotebookLm(`/estudo ${title}`, opts);
+  }
+
+  // /notebook procurar <termo>
+  if (subCmd === 'procurar' || subCmd === 'search' || subCmd === 'buscar') {
+    const query = parts.slice(1).join(' ').trim();
+    if (!query) return '⚠️ Indica o termo a procurar nas fontes. Ex: `/notebook procurar creatina`';
+    const results = notebookLmService.searchSources(query, null, userId);
+    if (!results || results.length === 0) {
+      return `🔍 Sem resultados para "*${query}*" nas fontes anexadas ao NotebookLM.`;
+    }
+    let msg = `🔍 *RESULTADOS FTS5 NOTEBOOKLM ("${query}")*\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    results.forEach((r, idx) => {
+      msg += `${idx + 1}. 📄 *${r.title}* (\`${r.source_type}\`)\n`;
+      if (r.snippet) msg += `   ↳ _${r.snippet.replace(/<\/?b>/g, '*')}_\n`;
+      else msg += `   ↳ _${r.content.slice(0, 120)}..._\n`;
+    });
+    return msg;
+  }
+
+  // Fallback: se o primeiro argumento for o nome de um caderno existente, mostra as fontes dele
+  const existingNb = sqliteMasterDb.getNotebook(subCmd, userId);
+  if (existingNb) {
+    return notebookLmService.formatNotebookSourcesMarkdown(existingNb.id, userId);
+  }
+
+  return notebookLmService.formatNotebookLmHelpMarkdown();
+}
+
 export async function handle(text, ctx = {}) {
   const chatId = String(ctx.chat?.id || ctx.from?.id || process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || '');
   const trimmed = String(text || '').trim();
@@ -283,6 +480,11 @@ export async function handle(text, ctx = {}) {
 
   if (/^\/(reset|limpar)\b/i.test(lower)) {
     return await askAgent({ chatId, workerTag: 'dev', prompt: '/reset' });
+  }
+
+  // ─── NotebookLM: Grounded Q&A, Cadernos FTS5, Podcast Audio Overview & Estudo ───
+  if (/^\/(notebook|notebooks|notebooklm|caderno|cadernos|podcast|estudo)\b/i.test(lower)) {
+    return await handleNotebookLm(trimmed, { chatId, userId: chatId, completionFn: ctx.completionFn });
   }
 
   // ─── Motor Cloud-Native de Absorção & Adaptação de Ideias ──────────────────
@@ -779,6 +981,7 @@ export async function handle(text, ctx = {}) {
 
 export default {
   handle,
+  handleNotebookLm,
   handleStatusCloud,
   handleCompilarCloud,
   handleMemoria,
