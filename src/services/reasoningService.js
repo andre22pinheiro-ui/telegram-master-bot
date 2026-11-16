@@ -201,7 +201,7 @@ export async function generateDeterministicCompletion({ systemPrompt, prompt, ma
 /**
  * Ponto de Entrada Conversacional com Memória Multi-Turn SQLite.
  */
-export async function askAgent({ chatId = '950415577', workerTag = 'master', prompt, extraContext = '' }) {
+export async function askAgent({ chatId = '', workerTag = 'master', prompt, extraContext = '' }) {
   if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
     return 'Por favor, escreve uma pergunta ou tarefa para eu analisar.';
   }

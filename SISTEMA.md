@@ -191,7 +191,7 @@ Localizado em [`c:/Users/Surface_Dpc/Desktop/projectos/zeropaper-frota-bot`](fil
 
 ## 8. Segurança, Blueprints Render e Testes
 
-- **Controlo de Acesso ([`security.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/security.js)):** Dual Whitelist (`919115655`, `933276221`) + `CHAT_ID_AUTORIZADO` + `CHAT_ID_ESPOSA` opcional em `./data/autorizados.json`; validação WebApp HMAC-SHA256 ([`telegramAuth.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/telegramAuth.js)).
+- **Controlo de Acesso ([`security.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/security.js)):** Whitelist configurada via variáveis de ambiente (`AUTHORIZED_PHONE_NUMBERS`, `AUTHORIZED_TELEGRAM_USER_IDS`, `CHAT_ID_AUTORIZADO`, `CHAT_ID_ESPOSA`); validação WebApp HMAC-SHA256 ([`telegramAuth.js`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/src/shared/telegramAuth.js)).
 - **Render Blueprint Unificado ([`render.yaml`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/render.yaml)):** Declara explicitamente os dois serviços web (`telegram-master-bot` pessoal SQLite+Drive vs. `zeropaper-frota-bot` trabalho Supabase+ORS).
 - **Suites de Teste Oficiais:**
   - `npm test` em `telegram-master-bot`: [`tests/run_master_battery.mjs`](file:///c:/Users/Surface_Dpc/Desktop/projectos/telegram-master-bot/tests/run_master_battery.mjs)

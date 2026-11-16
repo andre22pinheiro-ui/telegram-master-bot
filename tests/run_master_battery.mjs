@@ -10,6 +10,8 @@ const TEST_DB_PATH = path.join(TMP_DIR, 'test_pessoal_master.db');
 process.env.MASTER_DB_PATH = TEST_DB_PATH;
 process.env.DISABLE_DRIVE_SYNC = 'true';
 process.env.NODE_ENV = 'test';
+process.env.AUTHORIZED_PHONE_NUMBERS = '351919115655,351933276221,919115655,933276221';
+process.env.CHAT_ID_AUTORIZADO = '950415577';
 
 // Imports dinâmicos após configurar MASTER_DB_PATH
 const { sqliteMasterDb, triggerCloudSyncDebounced: dbSyncHook } = await import('../src/shared/sqliteMasterDb.js');
@@ -33,7 +35,9 @@ const { evaluateAppleComparison } = await import('../src/services/appleRadarServ
 const { validateOmnibus90DayDeal } = await import('../src/services/amazonRadarService.js');
 const proactiveEngine = await import('../src/services/proactiveEngine.js');
 const cloudDevService = await import('../src/services/cloudDevService.js');
+const ideaHarvesterService = await import('../src/services/ideaHarvesterService.js');
 const workerNutricao = await import('../src/workers/worker_nutricao.js');
+const nutritionCatalogService = await import('../src/services/nutritionCatalogService.js');
 const workerImmo = await import('../src/workers/worker_immo.js');
 const workerDev = await import('../src/workers/worker_dev.js');
 const workerGeral = await import('../src/workers/worker_geral.js');
@@ -400,6 +404,65 @@ async function main() {
       }
     });
 
+    await runTest('NUT-03', 'Separação estrita Produto/Rótulo vs Compra vs Consumo Diário e fatores Atwater', () => {
+      // 1. Validar fatores de Atwater exatos (Proteína=4, HC=4, Gordura=9, Fibra=2)
+      const atw = nutritionCatalogService.calculateAtwaterEnergy({ protein: 20, carbs: 10, fat: 5, fibre: 2 });
+      assert(atw.energyKcal === 169, `Atwater deve calcular 169 kcal (obtido ${atw.energyKcal})`);
+
+      // 2. Registar rótulo no catálogo
+      const testUserId = `user_battery_${Date.now()}`;
+      const prodRes = nutritionCatalogService.registerProductWithFacts({
+        name: 'Queijo Quark Milbona Test',
+        barcode: `TEST_BC_${Date.now()}`,
+        protein: 12,
+        carbohydrates: 3.5,
+        fat: 0.2,
+        fibre: 0,
+        salt: 0.1
+      });
+      assert(prodRes.productId, 'Produto de teste deve ser criado com ID');
+
+      // 3. Registar compra de 4 unidades
+      nutritionCatalogService.recordPurchase({
+        userId: testUserId,
+        productId: prodRes.productId,
+        quantity: 4,
+        unit: 'un',
+        unitPrice: 1.19
+      });
+
+      // 4. Validar que o consumo diário PERMANECE RIGOROSAMENTE ZERO
+      const summaryInitial = nutritionCatalogService.getDailyNutritionSummary(testUserId);
+      assert(summaryInitial.totals.calories === 0, 'Registar rótulo e compra NÃO pode alterar calorias consumidas!');
+      assert(summaryInitial.totals.protein === 0, 'Registar rótulo e compra NÃO pode alterar proteína consumida!');
+      assert(summaryInitial.entriesCount === 0, 'entriesCount deve ser 0 antes de haver consumo!');
+
+      // 5. Registar consumo de 250g do produto
+      nutritionCatalogService.recordFoodConsumption({
+        userId: testUserId,
+        productId: prodRes.productId,
+        description: 'Queijo Quark Milbona Test (250g)',
+        quantity: 250,
+        unit: 'g'
+      });
+
+      // 6. Validar que agora o consumo aumentou proporcionalmente (12g * 2.5 = 30g proteína)
+      const summaryAfter = nutritionCatalogService.getDailyNutritionSummary(testUserId);
+      assert(summaryAfter.totals.protein === 30, `Esperado 30g de proteína consumida, obtido ${summaryAfter.totals.protein}`);
+      assert(summaryAfter.totals.calories > 0, 'Calorias devem ser superiores a zero após consumo');
+      assert(summaryAfter.entriesCount === 1, 'entriesCount deve ser 1 após consumo');
+
+      // 7. Validar handlers dos novos comandos no workerNutricao
+      const msgRotulo = workerNutricao.handleFotoRotulo();
+      assert(/NÃO.*conta como consumo/i.test(msgRotulo), 'handleFotoRotulo deve alertar para regra de isolamento');
+
+      const msgCompra = workerNutricao.handleAdicionarCompra('Aveia Integral 1 pacote', testUserId);
+      assert(/NÃO.*afeta.*diário calórico/i.test(msgCompra), 'handleAdicionarCompra deve garantir impacto zero');
+
+      const msgComer = workerNutricao.handleComer('150g Peito de frango', testUserId);
+      assert(msgComer.includes('Consumo Registado'), 'handleComer deve registar consumo com sucesso');
+    });
+
     // ─── MÓDULO 6: CMVM Imobiliário, Apple Comparação & Filtros /vigiar ───────
     console.log('\n📡 MÓDULO 6: Radar 5 Frentes, CMVM & Filtros /vigiar');
 
@@ -485,6 +548,109 @@ async function main() {
       assert(legacyPcOut.includes('STATUS CLOUD-NATIVE'), '/pc legado deve devolver status cloud sem erro');
       const legacyPrintOut = await workerDev.handle('/print', { chat: { id: 950415577 } });
       assert(legacyPrintOut.includes('zero dependência de PC local') && legacyPrintOut.includes('STATUS CLOUD-NATIVE'), '/print legado deve informar remoção do PC local');
+    });
+
+    await runTest('DEV-02', 'Padrões Mercury: Second Brain FTS5 (/memoria) e Token Budget ADR-044 (/budget)', async () => {
+      const testUserId = `user_mercury_${Date.now()}`;
+      const ctx = { chat: { id: 950415577 }, from: { id: 950415577, first_name: 'André' } };
+
+      // 1. Guardar factos com categorias diferentes
+      const f1 = sqliteMasterDb.saveMemoryFact({
+        userId: testUserId,
+        category: 'preferencia',
+        fact: 'Prefere café expresso curto sem açúcar após o almoço',
+        confidenceScore: 0.95
+      });
+      assert(f1.id, 'saveMemoryFact deve gerar ID');
+
+      const f2 = sqliteMasterDb.saveMemoryFact({
+        userId: testUserId,
+        category: 'rotina',
+        fact: 'Treino de hipertrofia às segundas e quartas às 19h00',
+        confidenceScore: 0.90
+      });
+
+      // 2. Pesquisar via FTS5
+      const searchRes = sqliteMasterDb.searchMemoryFacts(testUserId, 'expresso curto', 5);
+      assert(searchRes.length >= 1, 'searchMemoryFacts deve encontrar termo com FTS5');
+      assert(searchRes[0].fact.includes('café expresso curto'), 'Pesquisa FTS5 deve retornar o facto exato');
+
+      // 3. Comandos /memoria e /budget no workerDev
+      const memList = await workerDev.handle('/memoria', { chat: { id: testUserId } });
+      assert(memList.includes('SECOND BRAIN') || memList.includes('FACTOS DURÁVEIS'), '/memoria deve listar factos');
+
+      const memSearch = await workerDev.handle('/memoria café', { chat: { id: testUserId } });
+      assert(memSearch.includes('RESULTADOS DA PESQUISA') && memSearch.includes('café'), '/memoria <termo> deve pesquisar');
+
+      // 4. Token Budget ADR-044
+      sqliteMasterDb.recordTokenUsage({ model: 'gemini-flash-test', tokens: 12500, costEur: 0.0025 });
+      const budgetStatus = sqliteMasterDb.getTokenBudgetStatus();
+      assert(budgetStatus.totalTokens >= 12500, 'recordTokenUsage deve acumular tokens no orçamento diário');
+      assert(budgetStatus.totalCost > 0, 'recordTokenUsage deve acumular custo estimado');
+
+      const budgetCmd = await workerDev.handle('/budget', ctx);
+      assert(budgetCmd.includes('ORÇAMENTO DE TOKENS') && budgetCmd.includes('ADR-044'), '/budget deve exibir relatório com limiar 100k');
+    });
+
+    await runTest('DEV-03', 'IdeaHarvester: Absorção Cloud-Native, Filtro Anti-TUI/Daemons e Geração de Prompt IDE', async () => {
+      // 1. Mock do cliente Octokit para simular repositório com TUI Ink e Daemons locais
+      const mockOctokit = {
+        rest: {
+          repos: {
+            get: async () => ({
+              data: {
+                description: 'Terminal UI dashboard with Ink and systemd daemon for background polling',
+                topics: ['ink', 'tui', 'daemon', 'systemd'],
+                stargazers_count: 142,
+                language: 'TypeScript'
+              }
+            }),
+            getReadme: async () => ({
+              data: {
+                content: Buffer.from(
+                  '# Local Dashboard CLI\nUses React Ink for interactive terminal TUI and systemd service daemon to watch fs.watch files.\n<script>alert("xss")</script>'
+                ).toString('base64')
+              }
+            })
+          }
+        }
+      };
+
+      // 2. Absorver e adaptar repositório simulado
+      const harvested = await ideaHarvesterService.harvestAndAdaptIdea({
+        sourceUrl: 'https://github.com/mock-org/local-tui-daemon',
+        targetProject: 'frota-bot',
+        userNotes: 'Adaptar telemetria para o bot de frotas sem rodar localmente',
+        octokitClient: mockOctokit
+      });
+
+      assert(harvested.id, 'Ideia deve ser gravada com ID na tabela idea_radar');
+      assert(harvested.target_project === 'frota-bot', 'Projeto alvo deve ser preservado');
+      assert(!harvested.extracted_summary.includes('<script>'), 'Sanitização ADR-044 deve expurgar tags perigosas');
+
+      // 3. Verificar que requisitos locais foram rejeitados e convertidos para Cloud
+      const rejectedItems = harvested.cloudPlan.filter((c) => c.status === 'REJEITADO_E_CONVERTIDO');
+      assert(rejectedItems.length >= 2, 'Pelo menos 2 padrões locais (TUI e Daemons) devem ser rejeitados e convertidos');
+      const conversionText = harvested.cloud_adaptation_plan;
+      assert(conversionText.includes('Telegraf') || conversionText.includes('Markup'), 'TUI deve ser convertido para Telegraf/Webhooks');
+      assert(conversionText.includes('node-cron') || conversionText.includes('Render'), 'Daemons devem ser convertidos para node-cron ou Render');
+
+      // 4. Verificar ide_prompt
+      assert(harvested.ide_prompt.includes('Antigravity IDE Implementation Prompt'), 'ide_prompt deve conter cabeçalho canónico');
+      assert(harvested.ide_prompt.includes('<untrusted_data'), 'ide_prompt deve conter delimitação de segurança <untrusted_data>');
+
+      // 5. Testar comandos no workerDev
+      const ctx = { chat: { id: 950415577 }, from: { id: 950415577, first_name: 'André' } };
+
+      const radarOut = await workerDev.handle('/radar_ideias', ctx);
+      assert(radarOut.includes('RADAR DE IDEIAS') && radarOut.includes(`#${harvested.id}`), '/radar_ideias deve listar a ideia gravada');
+
+      const promptOut = await workerDev.handle(`/gerar_prompt_ideia ${harvested.id}`, ctx);
+      assert(promptOut.includes('PROMPT ESTRUTURADO PARA O ANTIGRAVITY IDE') && promptOut.includes('Antigravity IDE Implementation Prompt'), '/gerar_prompt_ideia deve emitir o bloco de prompt');
+
+      // Testar comando /absorver_ideia com fallback
+      const directCmd = await workerDev.handle('/absorver_ideia https://github.com/exemplo/repo-teste master-bot "Apenas teste"', ctx);
+      assert(directCmd.includes('Ideia Open-Source Absorvida com Sucesso'), '/absorver_ideia deve responder com sucesso');
     });
 
     await runTest('RADAR-02', 'Atalhos diretos /vigiar_amazon e /vigiar_apple criam filtros dedicados', async () => {

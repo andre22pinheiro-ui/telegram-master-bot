@@ -296,7 +296,7 @@ export function parseReminderInput(input) {
 
 function handleLembretes(rawInput, ctx) {
   const input = (rawInput || '').trim();
-  const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
+  const chatId = String(ctx.chat?.id || ctx.from?.id || process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || '');
   const user = { first_name: ctx.from?.first_name || 'André', username: ctx.from?.username };
 
   // Subcomando apagar / remover
@@ -365,7 +365,7 @@ function handleLembretes(rawInput, ctx) {
 
 function handleAgenda(rawInput, ctx) {
   const input = (rawInput || '').trim();
-  const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
+  const chatId = String(ctx.chat?.id || ctx.from?.id || process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || '');
   const user = { first_name: ctx.from?.first_name || 'André', username: ctx.from?.username };
 
   if (!input || /^(ver|listar)$/i.test(input)) {
@@ -417,7 +417,7 @@ function handleAgenda(rawInput, ctx) {
 // ─── Dispatcher Principal ───────────────────────────────────────────────────
 
 export async function handle(text, ctx = {}) {
-  const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
+  const chatId = String(ctx.chat?.id || ctx.from?.id || process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || '');
   log.info('Processando pedido GERAL', { text: text.substring(0, 60), chatId });
   const trimmed = text.trim();
 

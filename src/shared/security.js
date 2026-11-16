@@ -21,15 +21,20 @@ export function maskPhoneRgpd(phone = "") {
   return `${"*".repeat(Math.max(3, digits.length - 3))}${digits.slice(-3)}`;
 }
 
-// ─── Contactos Telefónicos Autorizados ──────────────────────────────────────
-export const AUTHORIZED_PHONES = [
-  "919115655",
-  "933276221",
-  "351919115655",
-  "351933276221"
-];
+// ─── Contactos Telefónicos e IDs Autorizados ────────────────────────────────
+function parseEnvList(val = "") {
+  return String(val || "")
+    .split(",")
+    .map(s => s.trim().replace(/\D/g, ""))
+    .filter(Boolean);
+}
 
-const CHAT_ID_AUTORIZADO = process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || "950415577";
+export const AUTHORIZED_PHONES = (process.env.AUTHORIZED_PHONE_NUMBERS
+  ? parseEnvList(process.env.AUTHORIZED_PHONE_NUMBERS)
+  : []
+);
+
+const CHAT_ID_AUTORIZADO = process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || "";
 
 const AUTH_FILE = path.resolve("./data/autorizados.json");
 
@@ -43,12 +48,15 @@ function loadAuthStore() {
     log.error("Erro ao ler autorizados.json:", err.message);
   }
 
-  // Estado inicial padrão
+  // Estado inicial padrão lendo exclusivamente de variáveis de ambiente
+  const envUserIds = (process.env.AUTHORIZED_TELEGRAM_USER_IDS || process.env.AUTHORIZED_CHAT_IDS || CHAT_ID_AUTORIZADO || "")
+    .split(",")
+    .map(s => s.trim())
+    .filter(Boolean);
+
   const initial = {
-    authorizedUserIds: [String(CHAT_ID_AUTORIZADO)],
-    phoneMapping: {
-      [String(CHAT_ID_AUTORIZADO)]: "919115655"
-    }
+    authorizedUserIds: envUserIds,
+    phoneMapping: {}
   };
   saveAuthStore(initial);
   return initial;
@@ -177,7 +185,7 @@ export async function authMiddleware(ctx, next) {
       log.warn(`⛔ Tentativa de validação falhada com número não autorizado: ${maskPhoneRgpd(contact.phone_number)} (ID: ${userId})`);
       await ctx.reply(
         `⛔ *Acesso Recusado*\n━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `O número (*+${contact.phone_number}*) não consta da lista restrita de contactos autorizados (*919 115 655* e *933 276 221*).\n\n` +
+        `O número (*+${contact.phone_number}*) não consta da lista restrita de contactos autorizados.\n\n` +
         `Se és o proprietário deste número e necessitas de acesso, contacta o administrador do sistema.`,
         {
           parse_mode: "Markdown",
@@ -192,9 +200,7 @@ export async function authMiddleware(ctx, next) {
   log.warn(`⛔ [SEGURANÇA] Acesso bloqueado para @${username} (ID: ${userId}, Chat: ${chatId})`);
   await ctx.reply(
     `🔒 *Acesso Privado e Restrito*\n━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-    `Este ecossistema de bots é de uso pessoal e estritamente reservado a dois números autorizados:\n` +
-    `• *+351 919 115 655*\n` +
-    `• *+351 933 276 221*\n\n` +
+    `Este ecossistema de bots é de uso pessoal e estritamente reservado aos utilizadores autorizados.\n\n` +
     `Para desbloquear o teu acesso no Telegram, clica no botão abaixo para validar o teu número de telemóvel:`,
     {
       parse_mode: "Markdown",

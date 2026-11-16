@@ -9,6 +9,12 @@ import {
   dispatchGithubBuild,
   listVercelAppsOrDeployments
 } from '../services/cloudDevService.js';
+import {
+  harvestAndAdaptIdea,
+  listHarvestedIdeas,
+  getIdePromptForIdea,
+  VALID_TARGET_PROJECTS
+} from '../services/ideaHarvesterService.js';
 import { getPladurSpecifications } from '../services/pladurService.js';
 import {
   getErrorStatusMarkdown,
@@ -42,22 +48,257 @@ function handleApks() {
   );
 }
 
-async function handleCode(userMessage, chatId = '950415577') {
+async function handleCode(userMessage, chatId = '') {
   return await askAgent({
-    chatId,
+    chatId: chatId || process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || '',
     workerTag: 'dev',
     prompt: userMessage
   });
 }
 
+export function handleMemoria(rawArgs = '', userId = 'default_user') {
+  const clean = String(rawArgs || '').trim();
+
+  if (!clean || clean === 'listar' || clean === 'ver') {
+    const facts = sqliteMasterDb.listMemoryFacts(userId, 10);
+    if (!facts || facts.length === 0) {
+      return (
+        `🧠 *SECOND BRAIN (FTS5) — MEMÓRIA DURÁVEL*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `Sem factos registados na memória durável.\n\n` +
+        `💡 Para guardar um facto permanente:\n` +
+        `\`/memoria adicionar [categoria] <facto>\`\n` +
+        `Exemplo: \`/memoria adicionar cafe Prefere café curto sem açúcar\``
+      );
+    }
+    let msg = `🧠 *SECOND BRAIN (FTS5) — FACTOS DURÁVEIS:*\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    facts.forEach((f, i) => {
+      const conf = Math.round(Number(f.confidence_score || 1.0) * 100);
+      msg += `${i + 1}. [${f.category || 'geral'}] *${f.fact}* _(confiança: ${conf}%)_\n`;
+    });
+    msg += `\n🔍 _Para pesquisar com indexação FTS5:_ \`/memoria <termo>\``;
+    return msg;
+  }
+
+  if (/^(adicionar|guardar|save|add)\b/i.test(clean)) {
+    const resto = clean.replace(/^(adicionar|guardar|save|add)\s*/i, '').trim();
+    if (!resto) return '⚠️ Indica o facto a guardar. Ex: `/memoria adicionar prefere café curto`';
+
+    let category = 'geral';
+    let factText = resto;
+    const catMatch = resto.match(/^\[(.*?)\]\s*(.*)$/) || resto.match(/^(\w+):\s*(.*)$/);
+    if (catMatch) {
+      category = catMatch[1].toLowerCase();
+      factText = catMatch[2];
+    }
+
+    const saved = sqliteMasterDb.saveMemoryFact({
+      userId,
+      category,
+      fact: factText,
+      confidenceScore: 1.0,
+      source: 'manual'
+    });
+    return (
+      `🧠 *Facto Indexado no Second Brain (FTS5)!*\n` +
+      `• Categoria: *${saved.category}*\n` +
+      `• Facto: *${saved.fact}*\n` +
+      `• Confiança: 100% (Manual)\n\n` +
+      `Pesquisa instantânea ativa com \`/memoria ${saved.fact.split(' ')[0]}\`.`
+    );
+  }
+
+  if (clean === 'limpar' || clean === 'clear') {
+    sqliteMasterDb.clearMemoryFacts(userId);
+    return '🧠 *Second Brain:* Todos os factos da memória durável foram limpos.';
+  }
+
+  const results = sqliteMasterDb.searchMemoryFacts(userId, clean, 5);
+  if (!results || results.length === 0) {
+    return `🔍 *Second Brain (FTS5):* Nenhum facto encontrado para "${clean}".`;
+  }
+
+  let msg = `🔍 *RESULTADOS DA PESQUISA FTS5: "${clean}"*\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  results.forEach((f, i) => {
+    const conf = Math.round(Number(f.confidence_score || 1.0) * 100);
+    msg += `${i + 1}. [${f.category}] *${f.fact}* _(confiança: ${conf}%)_\n`;
+  });
+  return msg;
+}
+
+export function handleBudget(rawArgs = '') {
+  const status = sqliteMasterDb.getTokenBudgetStatus();
+  const limit = 100000;
+  const used = status.totalTokens;
+  const pct = Math.min(Math.round((used / limit) * 100), 100);
+  const bars = Math.round(pct / 10);
+  const barStr = '█'.repeat(bars) + '░'.repeat(10 - bars);
+
+  let msg =
+    `💰 *ORÇAMENTO DE TOKENS & IA (ADR-044)*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📅 *Data:* ${status.date}\n` +
+    `🎯 *Tokens Consumidos Hoje:* ${used.toLocaleString('pt-PT')} / ${limit.toLocaleString('pt-PT')} (${pct}%)\n` +
+    `[${barStr}] ${pct}%\n\n` +
+    `💶 *Custo Estimado:* ~${status.totalCost.toFixed(4)} €\n` +
+    `📞 *Total de Chamadas IA:* ${status.totalRequests}\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+
+  if (status.models && status.models.length > 0) {
+    msg += `📊 *Consumo por Modelo:*\n`;
+    status.models.forEach((m) => {
+      msg += `• *${m.model}*: ${Number(m.tokens_used).toLocaleString('pt-PT')} tokens (~${Number(m.cost_estimate_eur).toFixed(4)}€ | ${m.requests_count} reqs)\n`;
+    });
+  } else {
+    msg += `_Sem consumo registado hoje. Dentro do limite diário._\n`;
+  }
+
+  msg += `\n🔒 _Governação ADR-044: Threshold de 100k tokens/dia garante contenção de custos e zero estouro de quotas._`;
+  return msg;
+}
+
+// ─── Motor Cloud-Native de Absorção & Adaptação de Ideias ──────────────────
+
+export async function handleAbsorverIdeia(rawArgs = '') {
+  const clean = String(rawArgs || '').trim();
+  if (!clean) {
+    return (
+      `💡 *Como absorver e adaptar ideias Open-Source:*\n` +
+      `\`/absorver_ideia <url_github_ou_web> [projeto_alvo] [notas]\`\n\n` +
+      `*Projetos Alvo Disponíveis:*\n` +
+      `• \`master-bot\` (Assistente Pessoal / Notícias / SQLite)\n` +
+      `• \`frota-bot\` (ZeroPaperFrota / Supabase / Tacógrafo)\n` +
+      `• \`appfrota\` (Frontend Next.js Vercel)\n` +
+      `• \`rotabus\` (Navegação Android / OSM)\n` +
+      `• \`android\` (Apps Móveis Nativas)\n\n` +
+      `*Exemplo:*\n` +
+      `\`/absorver_ideia https://github.com/exemplo/repo-odometro frota-bot "Adaptação para odómetro sem TUI"\``
+    );
+  }
+
+  const parts = clean.split(/\s+/);
+  const url = parts[0];
+  let target = 'master-bot';
+  let notes = '';
+
+  if (parts.length > 1) {
+    if (VALID_TARGET_PROJECTS.includes(parts[1].toLowerCase())) {
+      target = parts[1].toLowerCase();
+      notes = parts.slice(2).join(' ');
+    } else {
+      notes = parts.slice(1).join(' ');
+    }
+  }
+
+  try {
+    const idea = await harvestAndAdaptIdea({ sourceUrl: url, targetProject: target, userNotes: notes });
+    const planText = idea.cloudPlan && idea.cloudPlan.length > 0
+      ? idea.cloudPlan.map((c) => `• *${c.localPattern}*:\n  ↳ ${c.cloudAlternative}`).join('\n')
+      : '• Arquitetura diretamente compatível.';
+
+    return (
+      `🚀 *Ideia Open-Source Absorvida com Sucesso!*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📌 *Origem:* ${idea.source_url} ${idea.repo_name ? `(${idea.repo_name})` : ''}\n` +
+      `🎯 *Projeto Alvo:* \`${idea.target_project}\`\n` +
+      `🔢 *ID no Radar:* \`#${idea.id}\`\n\n` +
+      `🛡️ *Filtro Cloud-Native (Conversões Efetuadas):*\n` +
+      `${planText}\n\n` +
+      `📋 *Próximo Passo:* Para obter o prompt estruturado pronto para o Antigravity IDE:\n` +
+      `👉 \`/gerar_prompt_ideia ${idea.id}\``
+    );
+  } catch (err) {
+    log.error('Erro ao absorver ideia:', err.message);
+    return `❌ Erro ao absorver ideia de "${url}": ${err.message}`;
+  }
+}
+
+export function handleRadarIdeias(rawArgs = '') {
+  const clean = String(rawArgs || '').trim();
+  const target = clean && VALID_TARGET_PROJECTS.includes(clean.toLowerCase()) ? clean.toLowerCase() : null;
+  const ideas = listHarvestedIdeas(target, 10);
+
+  if (!ideas || ideas.length === 0) {
+    return (
+      `📡 *RADAR DE IDEIAS OPEN-SOURCE*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `Nenhuma ideia registada no radar ${target ? `para \`${target}\`` : ''}.\n\n` +
+      `Para absorver uma ideia nova:\n` +
+      `\`/absorver_ideia <url> [projeto_alvo]\``
+    );
+  }
+
+  let msg = `📡 *RADAR DE IDEIAS OPEN-SOURCE (${ideas.length}):*\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  ideas.forEach((item) => {
+    const nome = item.repo_name || item.source_url.replace(/^https?:\/\//i, '').slice(0, 30);
+    const data = new Date(item.created_at).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' });
+    msg += `• *#${item.id}* [${item.target_project}] *${nome}* _(${data})_\n  ↳ Status: \`${item.status}\` | \`/gerar_prompt_ideia ${item.id}\`\n`;
+  });
+
+  return msg;
+}
+
+export function handleGerarPromptIdeia(rawArgs = '') {
+  const clean = String(rawArgs || '').replace('#', '').trim();
+  const id = parseInt(clean, 10);
+
+  if (isNaN(id) || id <= 0) {
+    const list = listHarvestedIdeas(null, 5);
+    if (list.length === 0) {
+      return `⚠️ Indica o ID da ideia. Ex: \`/gerar_prompt_ideia 1\`. Usa \`/absorver_ideia <url>\` para registar uma nova.`;
+    }
+    return (
+      `⚠️ *Indica o ID da ideia a gerar:*\n\n` +
+      list.map((i) => `• ID **#${i.id}**: ${i.repo_name || i.source_url} (\`${i.target_project}\`)`).join('\n') +
+      `\n\nExemplo: \`/gerar_prompt_ideia ${list[0].id}\``
+    );
+  }
+
+  const prompt = getIdePromptForIdea(id);
+  if (!prompt) {
+    return `❌ Ideia #${id} não encontrada no radar. Consulta com \`/radar_ideias\`.`;
+  }
+
+  return (
+    `🤖 *PROMPT ESTRUTURADO PARA O ANTIGRAVITY IDE (Ideia #${id})*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `_Copia o bloco abaixo para alimentar o teu agente no Antigravity IDE:_\n\n` +
+    `\`\`\`markdown\n` +
+    `${prompt}\n` +
+    `\`\`\``
+  );
+}
+
 export async function handle(text, ctx = {}) {
-  const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
+  const chatId = String(ctx.chat?.id || ctx.from?.id || process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || '');
   const trimmed = String(text || '').trim();
   const lower = trimmed.toLowerCase();
   log.info('Processando pedido DEV Cloud', { text: trimmed.substring(0, 60), chatId });
 
   if (/^\/(reset|limpar)\b/i.test(lower)) {
     return await askAgent({ chatId, workerTag: 'dev', prompt: '/reset' });
+  }
+
+  // ─── Motor Cloud-Native de Absorção & Adaptação de Ideias ──────────────────
+  if (/^\/absorver_ideia\b/i.test(lower)) {
+    return await handleAbsorverIdeia(trimmed.replace(/^\/absorver_ideia\s*/i, '').trim());
+  }
+
+  if (/^\/radar_ideias\b/i.test(lower)) {
+    return handleRadarIdeias(trimmed.replace(/^\/radar_ideias\s*/i, '').trim());
+  }
+
+  if (/^\/gerar_prompt_ideia\b/i.test(lower)) {
+    return handleGerarPromptIdeia(trimmed.replace(/^\/gerar_prompt_ideia\s*/i, '').trim());
+  }
+
+  // ─── Padrões Mercury (Second Brain FTS5 + Token Budget ADR-044) ─────────────
+  if (/^\/memoria\b/i.test(lower)) {
+    return handleMemoria(trimmed.replace(/^\/memoria\s*/i, '').trim(), chatId);
+  }
+
+  if (/^\/budget\b/i.test(lower)) {
+    return handleBudget(trimmed.replace(/^\/budget\s*/i, '').trim());
   }
 
   if (/^\/(status_cloud|cloud|diagnostico|status|pc|pc_status|hardware|pc_sistema)\b/i.test(lower)) {
@@ -142,5 +383,10 @@ export async function handle(text, ctx = {}) {
 export default {
   handle,
   handleStatusCloud,
-  handleCompilarCloud
+  handleCompilarCloud,
+  handleMemoria,
+  handleBudget,
+  handleAbsorverIdeia,
+  handleRadarIdeias,
+  handleGerarPromptIdeia
 };

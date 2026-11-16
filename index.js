@@ -51,7 +51,7 @@ import {
 const log = createLogger('Master');
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN_MASTER || process.env.TELEGRAM_MASTER_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
-const CHAT_ID_AUTORIZADO = process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || process.env.TELEGRAM_CHAT_ID || '950415577';
+const CHAT_ID_AUTORIZADO = process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || process.env.TELEGRAM_CHAT_ID || '';
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 
 if (!TOKEN) {
@@ -163,12 +163,32 @@ async function processPhotoWithVision(ctx, botToken) {
       if (up && up.url) cdnUrl = up.url;
     } catch {}
 
-    const defaultPrompt =
-      caption ||
-      'Analisa detalhadamente esta imagem em português de Portugal (temperature 0.0, factual sem invenções). ' +
+    let defaultPrompt = caption;
+    if (!defaultPrompt) {
+      defaultPrompt =
+        'Analisa detalhadamente esta imagem em português de Portugal (temperature 0.0, factual sem invenções). ' +
         'Se for comida/refeição: identifica ingredientes, estima calorias (Kcal), proteína, hidratos e gordura. ' +
         'Se for erro de código ou ecrã: identifica causa e solução. ' +
         'Se for anúncio/produto/recibo: extrai preço, modelo, valores e datas reais visíveis.';
+    } else if (/\/foto_rotulo/i.test(caption)) {
+      defaultPrompt =
+        'És um especialista em rotulagem alimentar (Regulamento UE 1169/2011). ' +
+        'Lê a fotografia de rótulo e extrai com precisão em Português de Portugal: ' +
+        '1. Nome do produto e marca; 2. Código de barras (se visível); ' +
+        '3. Tabela Nutricional por 100g/100ml: Energia (kcal e kJ), Proteína (g), Hidratos de carbono (g) e açúcares (g), Lípidos/Gorduras (g) e saturados (g), Fibra (g), Sal (g). ' +
+        '4. Fatores de Atwater verificados (Proteína=4, HC=4, Gordura=9, Fibra=2 kcal/g). ' +
+        'Indica no início: "🏷️ *Rótulo Analisado para o Catálogo* (este registo NÃO soma calorias ao dia de hoje)".';
+    } else if (/\/foto_compra/i.test(caption)) {
+      defaultPrompt =
+        'Lê este talão de compras / produtos de supermercado. ' +
+        'Extrai a lista de itens comprados, quantidades, preço unitário e valor total. ' +
+        'Indica no início: "🧾 *Compras Analisadas para a Despensa* (compras arquivadas em histórico sem impactar consumo calórico)".';
+    } else if (/\/foto_refeicao/i.test(caption)) {
+      defaultPrompt =
+        'Analisa esta refeição/prato. Estima os ingredientes visíveis, porções em gramas e macronutrientes totais ' +
+        '(Calorias kcal, Proteína g, Hidratos g, Gordura g) com fatores de Atwater exatos. ' +
+        'Indica a percentagem face à meta diária de 160g de proteína e o comando para registo direto: /comer <gramas>g <refeição>.';
+    }
 
     const analysis = await analyzeImageBuffer(downloaded.buffer, 'image/jpeg', defaultPrompt);
     let reply = `🔍 *Análise Visual Grok Bot (Gemini Multimodal):*\n\n${analysis}`;
@@ -300,7 +320,32 @@ bot.command(['hoje', 'macros', 'resumo', 'nutri_hoje'], async (ctx) => {
   );
 });
 
-bot.command(['plano', 'dieta', 'proteina', 'agua', 'creatina', 'receita', 'receita_airfryer', 'receita_mcc'], async (ctx) => {
+bot.command([
+  'plano',
+  'dieta',
+  'proteina',
+  'agua',
+  'creatina',
+  'receita',
+  'receita_airfryer',
+  'receita_mcc',
+  'comer',
+  'foto_refeicao',
+  'foto_rotulo',
+  'diario_alimentar',
+  'resumo_nutricional',
+  'consumo_agua',
+  'metas_nutricionais',
+  'adicionar_compra',
+  'foto_compra',
+  'comprado',
+  'historico_compras',
+  'produtos_frequentes',
+  'mais_consumidos',
+  'mais_comprados',
+  'corrigir_produto',
+  'eliminar_produto'
+], async (ctx) => {
   await ctx.sendChatAction('typing');
   await sendReply(ctx, await handleNutricao(ctx.message.text, ctx));
 });
@@ -315,7 +360,7 @@ bot.command(['radar', 'pesquisar_imoveis', 'varredura', 'casas', 'moradias_novas
   await sendReply(ctx, await handleImmo(ctx.message.text, ctx));
 });
 
-bot.command(['projetos', 'criar_app', 'compilar', 'build', 'status_cloud', 'status_nuvem', 'cloud', 'diagnostico', 'status', 'code', 'deploy', 'pc', 'pc_status', 'pc_sistema', 'hardware', 'print', 'screenshot', 'ecra', 'ecrã', 'pladur', 'erros', 'self_refine'], async (ctx) => {
+bot.command(['projetos', 'criar_app', 'compilar', 'build', 'status_cloud', 'status_nuvem', 'cloud', 'diagnostico', 'status', 'code', 'deploy', 'pc', 'pc_status', 'pc_sistema', 'hardware', 'print', 'screenshot', 'ecra', 'ecrã', 'pladur', 'erros', 'self_refine', 'memoria', 'budget', 'absorver_ideia', 'radar_ideias', 'gerar_prompt_ideia'], async (ctx) => {
   await ctx.sendChatAction('typing');
   const reply = /^\/status_nuvem\b/i.test(ctx.message.text)
     ? await handleStatusCloud()

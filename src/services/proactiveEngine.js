@@ -24,7 +24,7 @@ function getDefaultAdminChatId() {
     process.env.CHAT_ID_AUTORIZADO ||
       process.env.AUTHORIZED_CHAT_ID ||
       process.env.TELEGRAM_CHAT_ID ||
-      '950415577'
+      ''
   ).trim();
 }
 

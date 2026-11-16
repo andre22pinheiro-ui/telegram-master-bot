@@ -140,9 +140,10 @@ export function avaliarImovelCmvm({
   let valorIntrinseco = valorConstrucaoBase + valorTerreno + bonusEnergia - custoReabilitacao + ajusteEstado;
 
   // 6. PENALIZAÇÃO DE RISCO LEGAL — SEM LICENÇA DE UTILIZAÇÃO
+  // Nota pericial: Qualquer ajustamento deve ser fundamentado caso a caso e nunca apresentado como avaliação oficial.
   let penalizacaoLicenca = 0;
   if (semLicenca) {
-    penalizacaoLicenca = Math.round(valorIntrinseco * 0.25); // -25% por risco de embargo/dificuldade bancária
+    penalizacaoLicenca = Math.round(valorIntrinseco * 0.25); // Provisão estimada preliminar por risco documental/bancário
     valorIntrinseco -= penalizacaoLicenca;
   }
 
@@ -242,7 +243,7 @@ export function formatarAvaliacaoMarkdown(av) {
     md += `• Ajuste de estado: *${sinal}${av.ajusteEstado.toLocaleString('pt-PT')} €* _(${av.detalheEstado})_\n`;
   }
   if (av.penalizacaoLicenca > 0) {
-    md += `• ⚠️ *Sem Licença de Utilização:* *-${av.penalizacaoLicenca.toLocaleString('pt-PT')} €* _(penalização de 25% por risco legal)_\n`;
+    md += `• ⚠️ *Sem Licença de Utilização:* *-${av.penalizacaoLicenca.toLocaleString('pt-PT')} €* _(ajustamento documental preliminar; requer análise casuística e nunca substitui avaliação oficial)_\n`;
   }
 
   md += `━━━━━━━━━━━━━━━━━━━━━━━━\n`;

@@ -5,7 +5,7 @@ import { createLogger } from '../utils/logger.js';
 const log = createLogger('RadarCommon');
 
 export function getRadarRecipients() {
-  const mainId = String(process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || process.env.TELEGRAM_ADMIN_ID || '950415577').trim();
+  const mainId = String(process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || process.env.TELEGRAM_ADMIN_ID || '').trim();
   const wifeId = String(process.env.CHAT_ID_ESPOSA || '').trim();
   const list = [mainId];
   if (wifeId && wifeId !== mainId) list.push(wifeId);

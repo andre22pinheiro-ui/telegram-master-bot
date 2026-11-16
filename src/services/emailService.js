@@ -164,7 +164,7 @@ export async function summarizeEmailWithAI(email) {
 
   try {
     const summary = await askAgent({
-      chatId: '950415577',
+      chatId: process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || '',
       workerTag: 'master',
       prompt
     });

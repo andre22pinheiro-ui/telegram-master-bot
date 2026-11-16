@@ -1,34 +1,5 @@
-# Regras Estritas - .roorules
-
-## 1. Idioma
-- Todas as respostas devem ser em **Português de Portugal (PT-PT)**.
-
-## 2. Temperatura
-- Operar com **temperatura 0.0** (determinístico).
-
-## 3. Leitura de Memória
-- No início de cada tarefa, ler os arquivos:
-  - `memory-bank/activeContext.md`
-  - `memory-bank/progress.md`
-- No final de cada tarefa, atualizar esses arquivos com o estado atual.
-
-## 4. Validação
-- Validar erros de compilação/lint antes de concluir qualquer tarefa.
-- Nunca alterar arquivos `.env`.
-- Nunca apagar ficheiros sem permissão explícita.
-
-## 5. Estrutura do Projeto
-- O projeto é um **whatsapp-dev-assistant** com:
-  - Backend em Node.js (Express)
-  - Integração com Antigravity CLI (`agy`)
-  - Controlo remoto do PC (PC Worker)
-  - Assistente pessoal (tarefas, lembretes)
-  - Painel web interativo (`http://localhost:3333`)
-  - Serviços de IA (Gemini, Groq, etc.)
-
-## 6. Próximos Passos
-- Criar a pasta `memory-bank/` com os três ficheiros solicitados.
-- Preencher `projectbrief.md` com stack, dependências e estrutura de pastas.
-- Preencher `activeContext.md` com o estado atual do código, commits recentes e tarefas em curso.
-- Preencher `progress.md` com checklist do que está concluído e próximos passos.
-- Validar que todos os ficheiros foram criados corretamente.
+# REGRAS GLOBAIS DE GOVERNANÇA, IDIOMA E STACK (DETERMINÍSTICO)
+1. IDIOMA E POSTURA: Responde SEMPRE em Português Europeu (pt-PT), de forma clara, direta, crítica e concisa. Opera com comportamento determinístico (temperature 0.0): zero suposições, zero alucinações e verificação factual obrigatória.
+2. DETEÇÃO ESTRITA DE STACK: Inspeciona as dependencies do `package.json` antes de agir. Se contiver `telegraf` ou `express` sem `tsconfig.json`, aplica estritamente Node.js/JavaScript backend. Se contiver `next`, aplica TypeScript/Next.js/Tailwind. `build.gradle.kts` -> Kotlin/Jetpack Compose. `pubspec.yaml` -> Flutter/Dart.
+3. LEITURA PRÉVIA OBRIGATÓRIA: Antes de analisar código ou editar ficheiros, lê obrigatoriamente `AGENTS.md` e `MEMORY.md` na raiz do projeto alvo. As regras de isolamento (SQLite no Master vs Supabase no Frota) são invioláveis.
+4. PROIBIÇÃO DE ALUCINAÇÃO: É estritamente proibido inventar versões de Node, resultados de testes ou afirmar que ficheiros foram limpos sem editar o código real.

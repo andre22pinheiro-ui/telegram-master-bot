@@ -47,8 +47,6 @@ Método 2:
   1. Procura por @userinfobot no Telegram
   2. Envia /start — devolve o teu ID diretamente
 
-O teu Chat ID atual: 950415577
-
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PARTE 3 — CONFIGURAÇÃO DO FICHEIRO .env
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -56,7 +54,7 @@ PARTE 3 — CONFIGURAÇÃO DO FICHEIRO .env
 Edita o ficheiro .env na raiz do projeto:
 
   TELEGRAM_BOT_TOKEN_MASTER=<token do BotFather>
-  CHAT_ID_AUTORIZADO=950415577
+  CHAT_ID_AUTORIZADO=<teu_chat_id_numerico>
 
 Variáveis opcionais (ativam funcionalidades extra):
 

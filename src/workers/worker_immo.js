@@ -108,8 +108,8 @@ function handleVigiarCommand(rawArgs = '', ctx = {}) {
     termo,
     url,
     precoAlvo,
-    chatId: String(ctx.chat?.id || ctx.from?.id || '950415577'),
-    createdBy: ctx.from?.first_name || 'André'
+    chatId: String(ctx.chat?.id || ctx.from?.id || process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || ''),
+    createdBy: ctx.from?.first_name || 'Utilizador'
   });
 
   return (
@@ -169,7 +169,7 @@ function handleMenuImmo() {
 }
 
 export async function handle(text = '', ctx = {}) {
-  const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
+  const chatId = String(ctx.chat?.id || ctx.from?.id || process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || '');
   const trimmed = text.trim();
   log.info('Processando pedido Radar 5 Frentes', { text: trimmed.substring(0, 60), chatId });
 

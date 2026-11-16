@@ -3,6 +3,8 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 import { createLogger } from '../utils/logger.js';
+import { applyNutritionPurchaseMigration } from './migrations/nutritionPurchaseMigration.js';
+import { applyMercuryMigration } from './migrations/mercuryMigration.js';
 
 const log = createLogger('SqliteMasterDb');
 
@@ -77,8 +79,8 @@ function initTables(db) {
       id TEXT PRIMARY KEY,
       text TEXT NOT NULL,
       trigger_at TEXT NOT NULL,
-      chat_id TEXT DEFAULT '950415577',
-      created_by_name TEXT DEFAULT 'André',
+      chat_id TEXT,
+      created_by_name TEXT DEFAULT 'Utilizador',
       created_at TEXT NOT NULL,
       sent INTEGER DEFAULT 0,
       sent_at TEXT
@@ -209,8 +211,8 @@ function initTables(db) {
       url TEXT,
       preco_alvo REAL,
       ativo INTEGER DEFAULT 1,
-      chat_id TEXT DEFAULT '950415577',
-      created_by TEXT DEFAULT 'André',
+      chat_id TEXT,
+      created_by TEXT DEFAULT 'Utilizador',
       ultimo_preco REAL,
       ultima_verificacao TEXT,
       created_at TEXT NOT NULL
@@ -307,7 +309,7 @@ function migrateLegacyDataIfNeeded(db, dbPath) {
         if (db.prepare('SELECT COUNT(*) AS c FROM reminders').get().c === 0 && Array.isArray(store.reminders)) {
           const stmt = db.prepare('INSERT OR IGNORE INTO reminders (id, text, trigger_at, chat_id, created_by_name, created_at, sent, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
           for (const r of store.reminders) {
-            stmt.run(String(r.id || Date.now()), r.text || '', r.trigger_at || new Date().toISOString(), String(r.chat_id || '950415577'), r.created_by_name || 'André', r.created_at || new Date().toISOString(), r.sent ? 1 : 0, r.sent_at || null);
+            stmt.run(String(r.id || Date.now()), r.text || '', r.trigger_at || new Date().toISOString(), String(r.chat_id || process.env.CHAT_ID_AUTORIZADO || ''), r.created_by_name || 'Utilizador', r.created_at || new Date().toISOString(), r.sent ? 1 : 0, r.sent_at || null);
           }
         }
       });
@@ -398,9 +400,12 @@ export function getMasterDb() {
   const db = new Database(targetPath);
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
+  db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
 
   initTables(db);
+  applyNutritionPurchaseMigration(db);
+  applyMercuryMigration(db);
   migrateLegacyDataIfNeeded(db, targetPath);
 
   dbInstance = db;
@@ -590,20 +595,21 @@ export const sqliteMasterDb = {
     const rows = getMasterDb().prepare('SELECT * FROM reminders ORDER BY trigger_at ASC').all();
     return rows.map((r) => ({ ...r, sent: Boolean(r.sent) }));
   },
-  addReminder({ text, triggerAt, chatId = '950415577', user = {} }) {
+  addReminder({ text, triggerAt, chatId = '', user = {} }) {
     const id = generateId();
     const createdAt = new Date().toISOString();
     const isoTrigger = new Date(triggerAt).toISOString();
     const createdBy = userDisplayName(user);
+    const resolvedChatId = String(chatId || process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || '');
     getMasterDb()
       .prepare('INSERT INTO reminders (id, text, trigger_at, chat_id, created_by_name, created_at, sent) VALUES (?, ?, ?, ?, ?, ?, 0)')
-      .run(id, String(text || '').trim(), isoTrigger, String(chatId || '950415577'), createdBy, createdAt);
+      .run(id, String(text || '').trim(), isoTrigger, resolvedChatId, createdBy, createdAt);
     notifyDriveSync();
     return {
       id,
       text: String(text || '').trim(),
       trigger_at: isoTrigger,
-      chat_id: String(chatId || '950415577'),
+      chat_id: resolvedChatId,
       created_by_name: createdBy,
       created_at: createdAt,
       sent: false
@@ -914,8 +920,9 @@ export const sqliteMasterDb = {
   },
 
   // ─── 12. FILTROS ATIVOS (/vigiar) ───────────────────────────────────────────
-  addRadarFilter({ categoria, termo, url = null, precoAlvo = null, chatId = '950415577', createdBy = 'André' }) {
+  addRadarFilter({ categoria, termo, url = null, precoAlvo = null, chatId = '', createdBy = 'Utilizador' }) {
     const createdAt = new Date().toISOString();
+    const resolvedChatId = String(chatId || process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || '');
     const info = getMasterDb()
       .prepare(`
         INSERT INTO radar_filtros (categoria, termo, url, preco_alvo, ativo, chat_id, created_by, created_at)
@@ -926,8 +933,8 @@ export const sqliteMasterDb = {
         String(termo || '').trim(),
         url || null,
         precoAlvo ? Number(precoAlvo) : null,
-        String(chatId || '950415577'),
-        createdBy || 'André',
+        resolvedChatId,
+        createdBy || 'Utilizador',
         createdAt
       );
     notifyDriveSync();
@@ -1044,6 +1051,172 @@ export const sqliteMasterDb = {
     getMasterDb().prepare('UPDATE error_reports SET resolved = 1 WHERE id = ?').run(String(id));
     notifyDriveSync();
     return { success: true };
+  },
+
+  // ─── 17. PADRÕES MERCURY (SECOND BRAIN FTS5 & TOKEN BUDGET ADR-044) ─────────
+  saveMemoryFact({ userId, category = 'geral', fact, confidenceScore = 1.0, source = 'chat' }) {
+    const db = getMasterDb();
+    const id = generateId();
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO memory_facts (id, user_id, category, fact, confidence_score, source, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      String(userId),
+      String(category || 'geral'),
+      String(fact).trim(),
+      Number(confidenceScore) || 1.0,
+      String(source || 'chat'),
+      now,
+      now
+    );
+    notifyDriveSync();
+    return { id, userId, category, fact, confidenceScore, created_at: now };
+  },
+
+  searchMemoryFacts(userId, query, limit = 10) {
+    const db = getMasterDb();
+    const cleanQ = String(query || '').replace(/['"*]/g, '').trim();
+    if (!cleanQ) return this.listMemoryFacts(userId, limit);
+
+    try {
+      // Tentar pesquisa por FTS5 com MATCH
+      return db.prepare(`
+        SELECT mf.*
+        FROM memory_facts_fts fts
+        JOIN memory_facts mf ON mf.rowid = fts.rowid
+        WHERE mf.user_id = ? AND memory_facts_fts MATCH ?
+        ORDER BY mf.confidence_score DESC, mf.created_at DESC
+        LIMIT ?
+      `).all(String(userId), `"${cleanQ}"*`, limit);
+    } catch {
+      // Fallback robusto por LIKE
+      return db.prepare(`
+        SELECT * FROM memory_facts
+        WHERE user_id = ? AND (fact LIKE ? OR category LIKE ?)
+        ORDER BY confidence_score DESC, created_at DESC
+        LIMIT ?
+      `).all(String(userId), `%${cleanQ}%`, `%${cleanQ}%`, limit);
+    }
+  },
+
+  listMemoryFacts(userId, limit = 15) {
+    const db = getMasterDb();
+    return db.prepare(`
+      SELECT * FROM memory_facts
+      WHERE user_id = ?
+      ORDER BY confidence_score DESC, created_at DESC
+      LIMIT ?
+    `).all(String(userId), limit);
+  },
+
+  clearMemoryFacts(userId) {
+    const db = getMasterDb();
+    db.prepare('DELETE FROM memory_facts WHERE user_id = ?').run(String(userId));
+    notifyDriveSync();
+    return { success: true };
+  },
+
+  recordTokenUsage({ model = 'gemini-flash', tokens = 0, costEur = 0.0 }) {
+    const db = getMasterDb();
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const id = `${dateStr}_${model}`;
+    const used = Number(tokens) || 0;
+    const cost = Number(costEur) || 0.0;
+    const nowIso = now.toISOString();
+
+    db.prepare(`
+      INSERT INTO token_budget (id, date, model, tokens_used, token_limit, cost_estimate_eur, requests_count, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 100000, ?, 1, ?, ?)
+      ON CONFLICT(date, model) DO UPDATE SET
+        tokens_used = tokens_used + excluded.tokens_used,
+        cost_estimate_eur = cost_estimate_eur + excluded.cost_estimate_eur,
+        requests_count = requests_count + 1,
+        updated_at = excluded.updated_at
+    `).run(id, dateStr, model, used, cost, nowIso, nowIso);
+
+    notifyDriveSync();
+    return this.getTokenBudgetStatus(dateStr);
+  },
+
+  getTokenBudgetStatus(targetDate = null) {
+    const db = getMasterDb();
+    const dateStr = targetDate || new Date().toISOString().split('T')[0];
+    const rows = db.prepare('SELECT * FROM token_budget WHERE date = ?').all(dateStr);
+    let totalTokens = 0;
+    let totalCost = 0;
+    let totalRequests = 0;
+
+    for (const r of rows) {
+      totalTokens += Number(r.tokens_used || 0);
+      totalCost += Number(r.cost_estimate_eur || 0);
+      totalRequests += Number(r.requests_count || 0);
+    }
+
+    return {
+      date: dateStr,
+      totalTokens,
+      totalCost: Math.round(totalCost * 1000) / 1000,
+      totalRequests,
+      models: rows
+    };
+  },
+
+  // ─── 18. IDEA RADAR (ABSORÇÃO & ADAPTAÇÃO CLOUD-NATIVE DE IDEIAS) ───────────
+  saveIdeaRecord({
+    sourceUrl,
+    repoName = null,
+    targetProject = 'master-bot',
+    userNotes = null,
+    extractedSummary = '',
+    cloudAdaptationPlan = '',
+    idePrompt = '',
+    status = 'pending'
+  }) {
+    const db = getMasterDb();
+    const now = new Date().toISOString();
+    const info = db.prepare(`
+      INSERT INTO idea_radar (
+        source_url, repo_name, target_project, user_notes,
+        extracted_summary, cloud_adaptation_plan, ide_prompt, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      String(sourceUrl),
+      repoName ? String(repoName) : null,
+      String(targetProject || 'master-bot'),
+      userNotes ? String(userNotes) : null,
+      String(extractedSummary || ''),
+      String(cloudAdaptationPlan || ''),
+      String(idePrompt || ''),
+      String(status || 'pending'),
+      now,
+      now
+    );
+    notifyDriveSync();
+    return this.getIdeaRecord(info.lastInsertRowid);
+  },
+
+  getIdeaRecord(id) {
+    const db = getMasterDb();
+    return db.prepare('SELECT * FROM idea_radar WHERE id = ?').get(Number(id));
+  },
+
+  listIdeaRecords(targetProject = null, limit = 20) {
+    const db = getMasterDb();
+    if (targetProject) {
+      return db.prepare('SELECT * FROM idea_radar WHERE target_project = ? ORDER BY id DESC LIMIT ?').all(String(targetProject), limit);
+    }
+    return db.prepare('SELECT * FROM idea_radar ORDER BY id DESC LIMIT ?').all(limit);
+  },
+
+  updateIdeaStatus(id, status = 'adapted') {
+    const db = getMasterDb();
+    const now = new Date().toISOString();
+    db.prepare('UPDATE idea_radar SET status = ?, updated_at = ? WHERE id = ?').run(String(status), now, Number(id));
+    notifyDriveSync();
+    return this.getIdeaRecord(id);
   },
 
   // ─── ESTATÍSTICAS GERAIS & DIAGNÓSTICO ──────────────────────────────────────

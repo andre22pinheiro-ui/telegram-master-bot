@@ -26,7 +26,7 @@ const WORK_FLEET_PATTERNS = [
 
 const PATTERNS = {
   NUTRICAO: [
-    /^\/(plano|hoje|proteina|agua|creatina|nutricao|dieta|macros|receita|receita_airfryer|receita_mcc)\b/i,
+    /^\/(plano|hoje|proteina|agua|creatina|nutricao|dieta|macros|receita|receita_airfryer|receita_mcc|comer|foto_refeicao|foto_rotulo|diario_alimentar|resumo_nutricional|consumo_agua|metas_nutricionais|adicionar_compra|foto_compra|comprado|historico_compras|produtos_frequentes|mais_consumidos|mais_comprados|corrigir_produto|eliminar_produto)\b/i,
     /\b(prote[ií]na|creatina|macros?|calorias?|receita|air\s*fryer|monsieur\s+cuisine|\bmcc\b|lombo de porco|peito de frango|cottage|nestum)\b/i
   ],
   IMMO: [
@@ -34,8 +34,8 @@ const PATTERNS = {
     /\b(moradia|apartamento|im[oó]vel|imobili[aá]ri|idealista|imovirtual|cmvm|standvirtual|piscapisca|carmine|pcdiga|globaldata|pccomponentes|wallapop|amazon\.es|segunda\s+mano|iphone|macbook|recondicionad|grau\s+a|iservices|swappie|back\s*market)\b/i
   ],
   DEV: [
-    /^\/(code|projetos?|criar_app|deploy|apps?|apks?|status_cloud|status_nuvem|print|screenshot|pc|pc_status|hardware|pc_sistema|compilar|build|pladur|erros?|self_refine)\b/i,
-    /\b(c[oó]digo|bug|erro|node\.?js|react|github(?:\s+actions)?|vercel|render|cloud\s*status|status\s+da\s+nuvem|telemetria\s+cloud|webhook|pc\s*surface|screenshot|ecr[aã]|compilar\s+apk|pladur|en\s*520|en\s*14195|divis[oó]ria|self[-\s]?refine)\b/i
+    /^\/(code|projetos?|criar_app|deploy|apps?|apks?|status_cloud|status_nuvem|print|screenshot|pc|pc_status|hardware|pc_sistema|compilar|build|pladur|erros?|self_refine|memoria|budget|absorver_ideia|radar_ideias|gerar_prompt_ideia)\b/i,
+    /\b(c[oó]digo|bug|erro|node\.?js|react|github(?:\s+actions)?|vercel|render|cloud\s*status|status\s+da\s+nuvem|telemetria\s+cloud|webhook|pc\s*surface|screenshot|ecr[aã]|compilar\s+apk|pladur|en\s*520|en\s*14195|divis[oó]ria|self[-\s]?refine|fts5|second\s*brain|token\s*budget|absorver\s*ideia|radar\s*de\s*ideias)\b/i
   ],
   GERAL: [
     /^\/(noticias|noticia|news|europa|noticias_regiao|amarante|governo|leis|codigo_estrada|sri|cadeirinha|dl84|agenda|evento|mapa|amarante_mapa|ergonomia|farmacias?|compras?|tarefas?|carolina|nota|notas|lembrete|lembretes|briefing|resumo|emails?|ler_email|resumo_email|email_status|pesquisa|google|combustiveis|gasoleo|gasolina|transito|tv|programacao)\b/i,
@@ -106,7 +106,7 @@ export async function tryPersonalDispatch(text = '', ctx = {}) {
       return null;
     }
 
-    const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
+    const chatId = String(ctx.chat?.id || ctx.from?.id || process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || '');
     const user = { first_name: ctx.from?.first_name || 'André', username: ctx.from?.username };
     const data = parsed.data || {};
 
@@ -179,7 +179,7 @@ export async function tryPersonalDispatch(text = '', ctx = {}) {
  */
 export async function routeMessage(text = '', ctx = {}) {
   const trimmed = String(text || '').trim();
-  const chatId = String(ctx.chat?.id || ctx.from?.id || '950415577');
+  const chatId = String(ctx.chat?.id || ctx.from?.id || process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || '');
   const intent = detectIntent(trimmed);
 
   log.info(`[MasterRouter] intent=${intent}`, { preview: trimmed.slice(0, 60), chatId });
