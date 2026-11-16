@@ -1117,7 +1117,7 @@ async function main() {
         writeHead: (code) => { statusWritten = code; },
         end: () => { }
       });
-      assert(statusWritten === 500, 'Erro síncrono/assíncrono no webhookCallback deve devolver 500 sem derrubar o servidor Node');
+      assert(statusWritten === 200, 'Erro síncrono/assíncrono no webhookCallback deve devolver 200 OK para evitar loop de retries do Telegram');
     });
 
     // =========================================================================

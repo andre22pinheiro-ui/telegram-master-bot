@@ -31,10 +31,10 @@ function parseEnvList(val = "") {
 
 export const AUTHORIZED_PHONES = (process.env.AUTHORIZED_PHONE_NUMBERS
   ? parseEnvList(process.env.AUTHORIZED_PHONE_NUMBERS)
-  : []
+  : ["919115655", "933276221", "351919115655", "351933276221"]
 );
 
-const CHAT_ID_AUTORIZADO = process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || "";
+const CHAT_ID_AUTORIZADO = process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || "950415577";
 
 const AUTH_FILE = path.resolve("./data/autorizados.json");
 
@@ -78,18 +78,42 @@ function saveAuthStore(data) {
 
 let authStore = loadAuthStore();
 
+export function reloadAuthStore() {
+  authStore = loadAuthStore();
+  return authStore;
+}
+
 export function isAuthorized(userId, chatId) {
   const uid = String(userId || "");
   const cid = String(chatId || "");
 
-  if (uid === String(CHAT_ID_AUTORIZADO) || cid === String(CHAT_ID_AUTORIZADO)) {
+  if ((CHAT_ID_AUTORIZADO && (uid === String(CHAT_ID_AUTORIZADO) || cid === String(CHAT_ID_AUTORIZADO))) || uid === "950415577" || cid === "950415577") {
     return true;
   }
 
-  return (
-    authStore.authorizedUserIds.includes(uid) ||
-    authStore.authorizedUserIds.includes(cid)
+  if (!authStore?.authorizedUserIds || !authStore.authorizedUserIds.length) {
+    reloadAuthStore();
+  }
+
+  const inStore = (
+    authStore?.authorizedUserIds?.includes(uid) ||
+    authStore?.authorizedUserIds?.includes(cid)
   );
+
+  if (inStore) return true;
+
+  // Se falhar e o ficheiro existir, tenta recarregar uma vez antes de recusar
+  try {
+    if (fs.existsSync(AUTH_FILE)) {
+      const fresh = JSON.parse(fs.readFileSync(AUTH_FILE, "utf-8"));
+      if (Array.isArray(fresh.authorizedUserIds) && (fresh.authorizedUserIds.includes(uid) || fresh.authorizedUserIds.includes(cid))) {
+        authStore = fresh;
+        return true;
+      }
+    }
+  } catch {}
+
+  return false;
 }
 
 export function authorizeContact(userId, chatId, rawPhone, name = "Utilizador") {
@@ -198,17 +222,23 @@ export async function authMiddleware(ctx, next) {
 
   // 3. Utilizador não autorizado — Apresentar bloqueio e botão de autenticação
   log.warn(`⛔ [SEGURANÇA] Acesso bloqueado para @${username} (ID: ${userId}, Chat: ${chatId})`);
-  await ctx.reply(
-    `🔒 *Acesso Privado e Restrito*\n━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-    `Este ecossistema de bots é de uso pessoal e estritamente reservado aos utilizadores autorizados.\n\n` +
-    `Para desbloquear o teu acesso no Telegram, clica no botão abaixo para validar o teu número de telemóvel:`,
-    {
-      parse_mode: "Markdown",
-      ...Markup.keyboard([
-        [Markup.button.contactRequest("📱 Validar Acesso com o meu Telemóvel")]
-      ]).resize().oneTime()
+  try {
+    if (ctx.chat?.id) {
+      await ctx.reply(
+        `🔒 *Acesso Privado e Restrito*\n━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `Este ecossistema de bots é de uso pessoal e estritamente reservado aos utilizadores autorizados.\n\n` +
+        `Para desbloquear o teu acesso no Telegram, clica no botão abaixo para validar o teu número de telemóvel:`,
+        {
+          parse_mode: "Markdown",
+          ...Markup.keyboard([
+            [Markup.button.contactRequest("📱 Validar Acesso com o meu Telemóvel")]
+          ]).resize().oneTime()
+        }
+      );
     }
-  );
+  } catch (replyErr) {
+    log.warn(`Aviso ao enviar aviso de restrição para @${username} (ID: ${userId}): ${replyErr?.message || replyErr}`);
+  }
 }
 
 /**

@@ -29,7 +29,13 @@ services:
       - key: TELEGRAM_NUTRICAO_TOKEN
         sync: false
       - key: CHAT_ID_AUTORIZADO
-        sync: false
+        value: "950415577"
+      - key: AUTHORIZED_CHAT_ID
+        value: "950415577"
+      - key: AUTHORIZED_TELEGRAM_USER_IDS
+        value: "950415577"
+      - key: AUTHORIZED_PHONE_NUMBERS
+        value: "919115655,933276221,351919115655,351933276221"
       - key: CHAT_ID_ESPOSA
         sync: false
       - key: GEMINI_API_KEY

@@ -310,6 +310,12 @@ export async function restoreAllFromDrive(folderId = DEFAULT_DRIVE_FOLDER_ID) {
             if (existsSync(`${localTarget}-shm`)) unlinkSync(`${localTarget}-shm`);
           } catch {}
         }
+        if (item.name === 'autorizados.json') {
+          try {
+            const sec = await import('../shared/security.js');
+            sec.reloadAuthStore?.();
+          } catch {}
+        }
       }
     } else {
       log.debug(`Ficheiro [${item.name}] não encontrado no Drive; mantém-se a versão local se existir.`);

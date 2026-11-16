@@ -700,6 +700,33 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (urlPath === '/api/debug/system') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    const errors = sqliteMasterDb.getErrorReports ? sqliteMasterDb.getErrorReports(15) : [];
+    res.end(
+      JSON.stringify(
+        {
+          status: 'ok',
+          service: 'telegram-master-bot',
+          bot: '@AndrePinheirobot',
+          uptime: process.uptime(),
+          hasChatIdAutorizado: Boolean(process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID),
+          authorized: listAuthorized(),
+          botInfo: {
+            master: bot.botInfo,
+            bridges: legacyBridges.map((b) => ({ key: b.key, handle: b.handle, botInfo: b.bot?.botInfo }))
+          },
+          driveSync: getDriveSyncStatus(),
+          recentErrors: errors
+        },
+        null,
+        2
+      )
+    );
+    return;
+  }
+
   if (urlPath.startsWith('/api/family')) {
     if (handleFamilyApi(req, res, urlPath, req.method)) return;
   }

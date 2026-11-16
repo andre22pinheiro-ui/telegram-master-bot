@@ -373,10 +373,11 @@ export async function mountBotTransport({
     webhookCallbacks.set(webhookPath, (req, res) =>
       Promise.resolve(rawCallback(req, res)).catch((err) => {
         log.error(`Erro não tratado no webhook [${name}]:`, err?.message || err);
-        try { recordExecutionError({ serviceName: `webhook_${name}`, error: err, context: { webhookPath } }); } catch {}
+        try { recordExecutionError({ serviceName: `webhook_${name}`, error: err, context: { webhookPath, url: req.url, method: req.method } }); } catch {}
         if (!res.headersSent) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, error: 'Webhook processing error' }));
+          // Responder 200 OK ao Telegram para evitar loop infinito de reenvio por erro 500
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, handledError: true, error: err?.message || String(err) }));
         }
       })
     );
@@ -386,6 +387,14 @@ export async function mountBotTransport({
         targetBot.botInfo = await targetBot.telegram.getMe();
       } catch (err) {
         log.warn(`Aviso getMe [${name}]: ${err?.message || err}`);
+        const tokenParts = String(targetBot.token || '').split(':');
+        const fallbackId = parseInt(tokenParts[0], 10) || 0;
+        targetBot.botInfo = {
+          id: fallbackId,
+          is_bot: true,
+          first_name: name.replace('@', ''),
+          username: name.replace('@', '')
+        };
       }
     }
 
