@@ -1,7 +1,9 @@
-// src/services/reasoningService.js — Motor Grok Bot (@AndrePinheirobot) | Cascata IA temperature: 0.0
+// src/services/reasoningService.js — Motor Grok Bot (@AndrePinheirobot) | Cascata IA Ultrarrápida (temperature: 0.0)
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
+import http from 'http';
+import https from 'https';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
 import { conversationMemory } from '../shared/conversationMemory.js';
@@ -10,6 +12,16 @@ import { createLogger } from '../utils/logger.js';
 const log = createLogger('Reasoning');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const AGENTS_MD_PATH = path.resolve(__dirname, '../../AGENTS.md');
+
+// Pooling HTTP/HTTPS persistente para reutilização imediata de sockets TCP/TLS (sub-millisecond handshake)
+const httpAgent = new http.Agent({ keepAlive: true });
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 60000,
+  maxSockets: 50,
+  timeout: 10000
+});
+const httpClient = axios.create({ httpAgent, httpsAgent });
 
 export function loadAgentsMdDirectives() {
   try {
@@ -30,11 +42,18 @@ export const CONFORMANCE_MATRIX =
   `• Município de Amarante & CIM Tâmega e Sousa: PDM de Amarante / RMUE (1.350 €/m² Centro, 1.180 €/m² Periferia, 1.120 €/m² Limítrofe; terreno 35/8/2 €/m²) e avisos oficiais cm-amarante.pt, Proteção Civil Municipal, A4/Marão, EN15 e EN210.`;
 
 function getKeys() {
+  const groq = process.env.GROQ_API_KEY || '';
+  const gemini = process.env.GEMINI_API_KEY || '';
+  const openrouter = process.env.OPENROUTER_API_KEY || '';
+  const groqModel = process.env.GROQ_MODEL || 'qwen/qwen3.8-27b';
+  const primary = (process.env.PRIMARY_INFERENCE_PROVIDER || (groq ? 'groq' : 'gemini')).toLowerCase();
+
   return {
-    gemini: process.env.GEMINI_API_KEY || '',
-    groq: process.env.GROQ_API_KEY || '',
-    groqModel: process.env.GROQ_MODEL || 'qwen/qwen3.8-27b',
-    openrouter: process.env.OPENROUTER_API_KEY || ''
+    gemini,
+    groq,
+    groqModel,
+    openrouter,
+    primary
   };
 }
 
@@ -78,9 +97,9 @@ ${PERSONAL_POLICY}
 - Quando gerares receitas (Airfryer, Monsieur Cuisine Connect com ervas aromáticas diretas sem refogados pesados, ou Gerais), usa apenas os ingredientes pedidos quando especificados e produtos comuns PT, garantindo cálculo transparente de macros por dose incluindo a % da meta de 160g.`
 };
 
-// ─── Cascata Unificada (1. Gemini -> 2. Groq -> 3. OpenRouter | temp = 0.0) ──
+// ─── Cascata Unificada de Baixa Latência (Groq LPU -> Gemini Lite -> OpenRouter | temp = 0.0) ──
 
-async function callGemini({ systemInstruction, history = [], userText, maxTokens = 1600 }) {
+async function callGemini({ systemInstruction, history = [], userText, maxTokens = 1200 }) {
   const { gemini } = getKeys();
   if (!gemini) return null;
 
@@ -95,15 +114,17 @@ async function callGemini({ systemInstruction, history = [], userText, maxTokens
     }
   };
 
-  for (const model of ['gemini-flash-latest', 'gemini-flash-lite-latest']) {
+  // Modelos de latência ultrabaixa verificados e ativos
+  const models = ['gemini-flash-lite-latest', 'gemini-3.5-flash-lite'];
+  for (const model of models) {
     try {
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-      const res = await axios.post(endpoint, payload, {
+      const res = await httpClient.post(endpoint, payload, {
         headers: {
           'Content-Type': 'application/json',
           'X-goog-api-key': gemini
         },
-        timeout: 9000
+        timeout: 3500
       });
       const reply = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
       if (reply && reply.trim().length > 0) {
@@ -116,7 +137,7 @@ async function callGemini({ systemInstruction, history = [], userText, maxTokens
   return null;
 }
 
-async function callOpenAiCompatible({ url, headers, models, systemInstruction, history = [], userText, maxTokens = 1600, providerName }) {
+async function callOpenAiCompatible({ url, headers, models, systemInstruction, history = [], userText, maxTokens = 1200, timeout = 3500, providerName }) {
   const messages = [
     { role: 'system', content: systemInstruction },
     ...history,
@@ -125,7 +146,7 @@ async function callOpenAiCompatible({ url, headers, models, systemInstruction, h
 
   for (const model of models) {
     try {
-      const res = await axios.post(
+      const res = await httpClient.post(
         url,
         {
           model,
@@ -133,7 +154,7 @@ async function callOpenAiCompatible({ url, headers, models, systemInstruction, h
           temperature: 0.0,
           max_tokens: maxTokens
         },
-        { headers, timeout: 9000 }
+        { headers, timeout }
       );
       const reply = res.data?.choices?.[0]?.message?.content;
       if (reply && reply.trim().length > 0) {
@@ -146,10 +167,11 @@ async function callOpenAiCompatible({ url, headers, models, systemInstruction, h
   return null;
 }
 
-async function callGroq({ systemInstruction, history = [], userText, maxTokens = 1600 }) {
+async function callGroq({ systemInstruction, history = [], userText, maxTokens = 1200 }) {
   const { groq, groqModel } = getKeys();
   if (!groq) return null;
-  const models = [...new Set([groqModel, 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b'].filter(Boolean))];
+  // Groq LPUs: qwen3.8-27b (~280ms), openai/gpt-oss-120b (~135ms), openai/gpt-oss-20b (~310ms)
+  const models = [...new Set([groqModel, 'qwen/qwen3.8-27b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'].filter(Boolean))];
   return await callOpenAiCompatible({
     url: 'https://api.groq.com/openai/v1/chat/completions',
     headers: { Authorization: `Bearer ${groq}`, 'Content-Type': 'application/json' },
@@ -158,11 +180,12 @@ async function callGroq({ systemInstruction, history = [], userText, maxTokens =
     history,
     userText,
     maxTokens,
+    timeout: 3000,
     providerName: 'groq'
   });
 }
 
-async function callOpenRouter({ systemInstruction, history = [], userText, maxTokens = 1600 }) {
+async function callOpenRouter({ systemInstruction, history = [], userText, maxTokens = 1200 }) {
   const { openrouter } = getKeys();
   if (!openrouter) return null;
   return await callOpenAiCompatible({
@@ -178,30 +201,52 @@ async function callOpenRouter({ systemInstruction, history = [], userText, maxTo
     history,
     userText,
     maxTokens,
+    timeout: 4000,
     providerName: 'openrouter'
   });
 }
 
 /**
  * Inferência sem histórico conversacional (usado por routers JSON e formatadores determinísticos).
+ * Prioriza Groq LPU (~135-280ms) ou Gemini Flash-Lite (~650ms).
  */
-export async function generateDeterministicCompletion({ systemPrompt, prompt, maxTokens = 1200 }) {
+export async function generateDeterministicCompletion({ systemPrompt, prompt, maxTokens = 500 }) {
   const sys = systemPrompt || SYSTEM_PROMPTS.master;
   const trimmed = String(prompt || '').trim();
   if (!trimmed) return null;
 
-  return (
-    (await callGemini({ systemInstruction: sys, userText: trimmed, maxTokens })) ||
-    (await callGroq({ systemInstruction: sys, userText: trimmed, maxTokens })) ||
-    (await callOpenRouter({ systemInstruction: sys, userText: trimmed, maxTokens })) ||
-    null
-  );
+  const { groq, gemini, openrouter, primary } = getKeys();
+
+  if (primary === 'groq' && groq) {
+    const res = await callGroq({ systemInstruction: sys, userText: trimmed, maxTokens });
+    if (res) return res;
+    if (gemini) {
+      const gRes = await callGemini({ systemInstruction: sys, userText: trimmed, maxTokens });
+      if (gRes) return gRes;
+    }
+  } else if (gemini) {
+    const gRes = await callGemini({ systemInstruction: sys, userText: trimmed, maxTokens });
+    if (gRes) return gRes;
+    if (groq) {
+      const res = await callGroq({ systemInstruction: sys, userText: trimmed, maxTokens });
+      if (res) return res;
+    }
+  } else if (groq) {
+    const res = await callGroq({ systemInstruction: sys, userText: trimmed, maxTokens });
+    if (res) return res;
+  }
+
+  if (openrouter) {
+    return await callOpenRouter({ systemInstruction: sys, userText: trimmed, maxTokens });
+  }
+  return null;
 }
 
 /**
  * Ponto de Entrada Conversacional com Memória Multi-Turn SQLite.
+ * Otimizado para latência ultrabaixa com cascata inteligente LPU + Keep-Alive.
  */
-export async function askAgent({ chatId = '', workerTag = 'master', prompt, extraContext = '' }) {
+export async function askAgent({ chatId = '', workerTag = 'master', prompt, extraContext = '', maxTokens = 1200 }) {
   if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
     return 'Por favor, escreve uma pergunta ou tarefa para eu analisar.';
   }
@@ -215,19 +260,37 @@ export async function askAgent({ chatId = '', workerTag = 'master', prompt, extr
   const systemInstruction = SYSTEM_PROMPTS[workerTag] || SYSTEM_PROMPTS.master;
   const userText = extraContext ? `[Contexto verificado do sistema: ${extraContext}]\n\n${trimmed}` : trimmed;
 
-  // 1. Primário: Google Gemini (temp = 0.0)
-  const geminiHistory = conversationMemory.getGeminiHistory(chatId, workerTag);
-  let result = await callGemini({ systemInstruction, history: geminiHistory, userText });
+  const { groq, gemini, openrouter, primary } = getKeys();
+  let result = null;
 
-  // 2. Secundário: Groq LPU (temp = 0.0)
-  if (!result) {
+  // 1. Primário de Alta Velocidade: Groq LPU (~135-280ms)
+  if (primary === 'groq' && groq) {
     const openAiHistory = conversationMemory.getOpenAiHistory(chatId, workerTag);
-    result = await callGroq({ systemInstruction, history: openAiHistory, userText });
+    result = await callGroq({ systemInstruction, history: openAiHistory, userText, maxTokens });
 
-    // 3. Terciário: OpenRouter (temp = 0.0)
-    if (!result) {
-      result = await callOpenRouter({ systemInstruction, history: openAiHistory, userText });
+    // Fallback rápido para Google Gemini Flash-Lite (~650ms)
+    if (!result && gemini) {
+      const geminiHistory = conversationMemory.getGeminiHistory(chatId, workerTag);
+      result = await callGemini({ systemInstruction, history: geminiHistory, userText, maxTokens });
     }
+  } else if (gemini) {
+    const geminiHistory = conversationMemory.getGeminiHistory(chatId, workerTag);
+    result = await callGemini({ systemInstruction, history: geminiHistory, userText, maxTokens });
+
+    // Fallback para Groq LPU
+    if (!result && groq) {
+      const openAiHistory = conversationMemory.getOpenAiHistory(chatId, workerTag);
+      result = await callGroq({ systemInstruction, history: openAiHistory, userText, maxTokens });
+    }
+  } else if (groq) {
+    const openAiHistory = conversationMemory.getOpenAiHistory(chatId, workerTag);
+    result = await callGroq({ systemInstruction, history: openAiHistory, userText, maxTokens });
+  }
+
+  // 3. Terciário: OpenRouter se os anteriores falharem
+  if (!result && openrouter) {
+    const openAiHistory = conversationMemory.getOpenAiHistory(chatId, workerTag);
+    result = await callOpenRouter({ systemInstruction, history: openAiHistory, userText, maxTokens });
   }
 
   if (result?.text) {

@@ -41,7 +41,7 @@ export async function analyzeImageBuffer(imageBuffer, mimeType = "image/jpeg", p
     }
   };
 
-  const models = ['gemini-flash-lite-latest', 'gemini-flash-latest'];
+  const models = ['gemini-flash-lite-latest', 'gemini-3.5-flash-lite', 'gemini-flash-latest'];
   for (const model of models) {
     try {
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
@@ -52,7 +52,7 @@ export async function analyzeImageBuffer(imageBuffer, mimeType = "image/jpeg", p
           "X-goog-api-key": geminiKey
         },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(10000)
+        signal: AbortSignal.timeout(6000)
       });
 
       const data = await res.json();

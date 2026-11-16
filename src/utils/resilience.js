@@ -88,7 +88,7 @@ export async function withTypingHeartbeat(ctx, asyncFn, intervalMs = 4000) {
     return asyncFn();
   }
 
-  await ctx.sendChatAction('typing').catch(() => {});
+  ctx.sendChatAction('typing').catch(() => {});
   const timer = setInterval(() => {
     ctx.sendChatAction('typing').catch(() => {});
   }, intervalMs);
