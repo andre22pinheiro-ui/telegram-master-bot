@@ -32,7 +32,8 @@ import {
   cleanChatMiddleware,
   addAuthorizedId,
   removeAuthorizedId,
-  listAuthorized
+  listAuthorized,
+  lastBlockedUser
 } from './src/shared/security.js';
 import { getTvCockpit, searchChannels, formatSearchResults, getXtreamCredentialsMarkdown, getVlcHelpMarkdown } from './src/services/tvService.js';
 import { initCloudPersistence, isDriveConfigured, getDriveSyncStatus, backupDatabaseToDrive, startAutoDriveSync } from './src/services/googleDriveService.js';
@@ -742,6 +743,7 @@ const server = http.createServer((req, res) => {
           uptime: process.uptime(),
           hasChatIdAutorizado: Boolean(process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID),
           authorized: listAuthorized(),
+          lastBlockedUser,
           telegramStatus: {
             master: masterVerify,
             bridges: bridgesVerify

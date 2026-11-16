@@ -78,6 +78,8 @@ function saveAuthStore(data) {
 
 let authStore = loadAuthStore();
 
+export let lastBlockedUser = null;
+
 export function reloadAuthStore() {
   authStore = loadAuthStore();
   return authStore;
@@ -178,43 +180,46 @@ export async function authMiddleware(ctx, next) {
     return next();
   }
 
-  // 2. Intercetar envio de contacto oficial para validação
-  if (ctx.message?.contact) {
-    const contact = ctx.message.contact;
-    const cleanPhone = String(contact.phone_number || "").replace(/\D/g, "");
-    const match = AUTHORIZED_PHONES.some(p => cleanPhone.endsWith(p) || cleanPhone === p);
-    const isSenderOwn = !contact.user_id || String(contact.user_id) === userId || match;
-
-    if (!isSenderOwn && !match) {
-      await ctx.reply(
-        "⛔ *Segurança:* Por motivos de verificação antifraude, tens de partilhar o teu próprio contacto através do botão oficial.",
-        { parse_mode: "Markdown" }
-      ).catch(() => {});
-      return;
+  // 2. Intercetar envio de contacto oficial ou introdução de número por texto (ex: Telegram Desktop)
+  let phoneCandidate = null;
+  if (ctx.message?.contact?.phone_number) {
+    phoneCandidate = String(ctx.message.contact.phone_number);
+  } else if (ctx.message?.text) {
+    const rawText = String(ctx.message.text).trim();
+    const digits = rawText.replace(/\D/g, "");
+    if (digits.length >= 9 && digits.length <= 15) {
+      phoneCandidate = digits;
     }
+  }
 
-    const res = authorizeContact(userId, chatId, contact.phone_number, ctx.from?.first_name);
-    if (res.success) {
-      await ctx.reply(
-        `✅ *Acesso Concedido com Sucesso!*\n━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `O teu número (*+${contact.phone_number}*) foi validado e registado no sistema de segurança.\n\n` +
-        `Tens agora acesso total e permanente ao **Grok Bot (@AndrePinheirobot)** (Pessoal, Família, Notícias Certificadas, Nutrição, Radar 5 Frentes & Dev).\n` +
-        `_(Nota: Gestão operacional de frotas corre em separado no bot @zeropaperfrotaBot)_\n\n` +
-        `Usa \`/menu\` para acederes ao Cockpit!`,
-        {
-          parse_mode: "Markdown",
-          ...Markup.removeKeyboard()
-        }
-      ).catch((replyErr) => {
-        log.error('Erro ao enviar mensagem de boas-vindas após autorização:', replyErr?.message || replyErr);
-      });
-      return;
+  if (phoneCandidate) {
+    const cleanPhone = phoneCandidate.replace(/\D/g, "");
+    const match = AUTHORIZED_PHONES.some(p => cleanPhone.endsWith(p) || cleanPhone === p);
+
+    if (match) {
+      const res = authorizeContact(userId, chatId, cleanPhone, ctx.from?.first_name || 'André');
+      if (res.success) {
+        log.info(`✅ Acesso desbloqueado com sucesso por telemóvel para @${username} (ID: ${userId})`);
+        await ctx.reply(
+          `✅ *Acesso Concedido com Sucesso!*\n━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `O teu número (*+${cleanPhone}*) foi validado e o teu Telegram ID (*${userId}*) foi registado na lista permanente de segurança.\n\n` +
+          `Tens agora acesso total ao **Grok Bot (@AndrePinheirobot)** (Pessoal, Família, Notícias Certificadas, Nutrição, Radar 5 Frentes & Dev).\n\n` +
+          `Usa \`/menu\` para acederes ao Cockpit!`,
+          {
+            parse_mode: "Markdown",
+            ...Markup.removeKeyboard()
+          }
+        ).catch((replyErr) => {
+          log.error('Erro ao enviar mensagem de boas-vindas após autorização:', replyErr?.message || replyErr);
+        });
+        return;
+      }
     } else {
-      log.warn(`⛔ Tentativa de validação falhada com número não autorizado: ${maskPhoneRgpd(contact.phone_number)} (ID: ${userId})`);
+      log.warn(`⛔ Tentativa de validação falhada com número não autorizado: ${maskPhoneRgpd(cleanPhone)} (ID: ${userId})`);
       await ctx.reply(
         `⛔ *Acesso Recusado*\n━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `O número (*+${contact.phone_number}*) não consta da lista restrita de contactos autorizados.\n\n` +
-        `Se és o proprietário deste número e necessitas de acesso, contacta o administrador do sistema.`,
+        `O número (*+${cleanPhone}*) não consta da lista restrita de contactos autorizados da família.\n\n` +
+        `Se és o proprietário deste número e necessitas de acesso, contacta o administrador.`,
         {
           parse_mode: "Markdown",
           ...Markup.removeKeyboard()
@@ -224,14 +229,18 @@ export async function authMiddleware(ctx, next) {
     }
   }
 
-  // 3. Utilizador não autorizado — Apresentar bloqueio e botão de autenticação
+  // 3. Utilizador não autorizado — Apresentar bloqueio e opções de autenticação
   log.warn(`⛔ [SEGURANÇA] Acesso bloqueado para @${username} (ID: ${userId}, Chat: ${chatId})`);
+  lastBlockedUser = { userId, chatId, username, at: new Date().toISOString() };
   try {
     if (ctx.chat?.id) {
       await ctx.reply(
         `🔒 *Acesso Privado e Restrito*\n━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `Este ecossistema de bots é de uso pessoal e estritamente reservado aos utilizadores autorizados.\n\n` +
-        `Para desbloquear o teu acesso no Telegram, clica no botão abaixo para validar o teu número de telemóvel:`,
+        `Este ecossistema de bots é de uso pessoal e estritamente reservado aos utilizadores autorizados da família.\n\n` +
+        `Para desbloquear o teu acesso no Telegram, podes:\n` +
+        `1. Clicar no botão abaixo para partilhar o contacto; ou\n` +
+        `2. **Escrever diretamente aqui no chat o teu número de telemóvel** (ex.: \`919115655\`).\n\n` +
+        `_(O teu ID de utilizador Telegram é: \`${userId}\`)_`,
         {
           parse_mode: "Markdown",
           ...Markup.keyboard([
