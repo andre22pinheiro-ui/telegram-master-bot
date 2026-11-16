@@ -60,7 +60,11 @@ export const LEGACY_FLEET_ACTIONS = [
 export function resolveToken(env = process.env, keys = []) {
   for (const k of keys) {
     const val = env?.[k];
-    if (val && String(val).trim()) return String(val).trim();
+    if (val && String(val).trim()) {
+      let t = String(val).trim().replace(/^["']+|["']+$/g, '').trim();
+      if (/^bot\d+:/.test(t)) t = t.slice(3);
+      return t;
+    }
   }
   return null;
 }

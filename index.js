@@ -50,7 +50,17 @@ import {
 
 const log = createLogger('Master');
 
-const TOKEN = process.env.TELEGRAM_BOT_TOKEN_MASTER || process.env.TELEGRAM_MASTER_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+export function cleanBotToken(raw) {
+  if (!raw) return '';
+  let token = String(raw).trim().replace(/^["']+|["']+$/g, '').trim();
+  if (/^bot\d+:/.test(token)) {
+    token = token.slice(3);
+  }
+  return token;
+}
+
+const RAW_TOKEN = process.env.TELEGRAM_BOT_TOKEN_MASTER || process.env.TELEGRAM_MASTER_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+const TOKEN = cleanBotToken(RAW_TOKEN);
 const CHAT_ID_AUTORIZADO = process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID || process.env.TELEGRAM_CHAT_ID || '';
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 
@@ -704,6 +714,25 @@ const server = http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.writeHead(200, { 'Content-Type': 'application/json' });
     const errors = sqliteMasterDb.getErrorReports ? sqliteMasterDb.getErrorReports(15) : [];
+
+    let masterVerify = null;
+    try {
+      const me = await bot.telegram.getMe();
+      masterVerify = { ok: true, id: me.id, username: me.username };
+    } catch (e) {
+      masterVerify = { ok: false, error: e.message };
+    }
+
+    const bridgesVerify = {};
+    for (const b of legacyBridges) {
+      try {
+        const me = await b.bot.telegram.getMe();
+        bridgesVerify[b.key] = { ok: true, id: me.id, username: me.username, handle: b.handle };
+      } catch (e) {
+        bridgesVerify[b.key] = { ok: false, error: e.message, handle: b.handle };
+      }
+    }
+
     res.end(
       JSON.stringify(
         {
@@ -713,6 +742,10 @@ const server = http.createServer((req, res) => {
           uptime: process.uptime(),
           hasChatIdAutorizado: Boolean(process.env.CHAT_ID_AUTORIZADO || process.env.AUTHORIZED_CHAT_ID),
           authorized: listAuthorized(),
+          telegramStatus: {
+            master: masterVerify,
+            bridges: bridgesVerify
+          },
           botInfo: {
             master: bot.botInfo,
             bridges: legacyBridges.map((b) => ({ key: b.key, handle: b.handle, botInfo: b.bot?.botInfo }))

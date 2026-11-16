@@ -181,13 +181,15 @@ export async function authMiddleware(ctx, next) {
   // 2. Intercetar envio de contacto oficial para validação
   if (ctx.message?.contact) {
     const contact = ctx.message.contact;
-    const isSenderOwn = !contact.user_id || String(contact.user_id) === userId;
+    const cleanPhone = String(contact.phone_number || "").replace(/\D/g, "");
+    const match = AUTHORIZED_PHONES.some(p => cleanPhone.endsWith(p) || cleanPhone === p);
+    const isSenderOwn = !contact.user_id || String(contact.user_id) === userId || match;
 
-    if (!isSenderOwn) {
+    if (!isSenderOwn && !match) {
       await ctx.reply(
         "⛔ *Segurança:* Por motivos de verificação antifraude, tens de partilhar o teu próprio contacto através do botão oficial.",
         { parse_mode: "Markdown" }
-      );
+      ).catch(() => {});
       return;
     }
 
@@ -203,7 +205,9 @@ export async function authMiddleware(ctx, next) {
           parse_mode: "Markdown",
           ...Markup.removeKeyboard()
         }
-      );
+      ).catch((replyErr) => {
+        log.error('Erro ao enviar mensagem de boas-vindas após autorização:', replyErr?.message || replyErr);
+      });
       return;
     } else {
       log.warn(`⛔ Tentativa de validação falhada com número não autorizado: ${maskPhoneRgpd(contact.phone_number)} (ID: ${userId})`);
@@ -215,7 +219,7 @@ export async function authMiddleware(ctx, next) {
           parse_mode: "Markdown",
           ...Markup.removeKeyboard()
         }
-      );
+      ).catch(() => {});
       return;
     }
   }
