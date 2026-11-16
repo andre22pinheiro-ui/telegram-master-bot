@@ -5,6 +5,10 @@ import path from 'path';
 import { createLogger } from '../utils/logger.js';
 import { applyNutritionPurchaseMigration } from './migrations/nutritionPurchaseMigration.js';
 import { applyMercuryMigration } from './migrations/mercuryMigration.js';
+import { applyHindsightMigration } from './migrations/hindsightMigration.js';
+import { applyAgentReachMigration } from './migrations/agentReachMigration.js';
+import { applyHomeAssistantMigration } from './migrations/homeAssistantMigration.js';
+import { applyIaNutricionistaMigration } from './migrations/iaNutricionistaMigration.js';
 
 const log = createLogger('SqliteMasterDb');
 
@@ -406,6 +410,10 @@ export function getMasterDb() {
   initTables(db);
   applyNutritionPurchaseMigration(db);
   applyMercuryMigration(db);
+  applyHindsightMigration(db);
+  applyAgentReachMigration(db);
+  applyHomeAssistantMigration(db);
+  applyIaNutricionistaMigration(db);
   migrateLegacyDataIfNeeded(db, targetPath);
 
   dbInstance = db;
@@ -1217,6 +1225,272 @@ export const sqliteMasterDb = {
     db.prepare('UPDATE idea_radar SET status = ?, updated_at = ? WHERE id = ?').run(String(status), now, Number(id));
     notifyDriveSync();
     return this.getIdeaRecord(id);
+  },
+
+  // ─── AGENT-REACH (ZERO-API-FEE WEB INTELLIGENCE) ───────────────────────────
+  getCachedReach(platform, queryOrUrl) {
+    const db = getMasterDb();
+    const now = new Date().toISOString();
+    const row = db.prepare(`
+      SELECT envelope_json FROM agent_reach_cache
+      WHERE platform = ? AND query_or_url = ? AND expires_at > ?
+    `).get(String(platform).toLowerCase(), String(queryOrUrl).trim().toLowerCase(), now);
+    if (!row?.envelope_json) return null;
+    try {
+      const parsed = JSON.parse(row.envelope_json);
+      return { ...parsed, cached: true };
+    } catch {
+      return null;
+    }
+  },
+
+  setCachedReach({ platform, queryOrUrl, title = '', author = '', url = '', snippet = '', envelope, ttlSeconds = 3600 }) {
+    const db = getMasterDb();
+    const now = new Date();
+    const cachedAt = now.toISOString();
+    const expiresAt = new Date(now.getTime() + (ttlSeconds * 1000)).toISOString();
+    const key = `${String(platform).toLowerCase()}:${String(queryOrUrl).trim().toLowerCase()}`;
+    const id = Buffer.from(key).toString('base64');
+    const jsonStr = typeof envelope === 'string' ? envelope : JSON.stringify(envelope);
+
+    db.prepare(`
+      INSERT OR REPLACE INTO agent_reach_cache (
+        id, platform, query_or_url, title, author, url, snippet, envelope_json, cached_at, expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      String(platform).toLowerCase(),
+      String(queryOrUrl).trim().toLowerCase(),
+      String(title || '').slice(0, 500),
+      String(author || '').slice(0, 100),
+      String(url || '').slice(0, 1000),
+      String(snippet || '').slice(0, 2000),
+      jsonStr,
+      cachedAt,
+      expiresAt
+    );
+    return true;
+  },
+
+  logReachQuery({ platform, queryOrUrl, resultsCount = 0, latencyMs = 0, status = 'ok' }) {
+    const db = getMasterDb();
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO agent_reach_logs (platform, query_or_url, results_count, latency_ms, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      String(platform).toLowerCase(),
+      String(queryOrUrl).slice(0, 500),
+      Number(resultsCount) || 0,
+      Number(latencyMs) || 0,
+      String(status || 'ok'),
+      now
+    );
+  },
+
+  getReachStats() {
+    const db = getMasterDb();
+    const cacheCount = db.prepare('SELECT COUNT(*) as c FROM agent_reach_cache').get()?.c || 0;
+    const logsCount = db.prepare('SELECT COUNT(*) as c FROM agent_reach_logs').get()?.c || 0;
+    const avgLatency = db.prepare('SELECT AVG(latency_ms) as a FROM agent_reach_logs').get()?.a || 0;
+    return {
+      cachedEntries: cacheCount,
+      totalQueries: logsCount,
+      averageLatencyMs: Math.round(avgLatency)
+    };
+  },
+
+  cleanExpiredReachCache() {
+    const db = getMasterDb();
+    const now = new Date().toISOString();
+    const res = db.prepare('DELETE FROM agent_reach_cache WHERE expires_at <= ?').run(now);
+    return res.changes;
+  },
+
+  // ─── HOME ASSISTANT & DOMÓTICA RESIDENCIAL (ADR-044) ───────────────────────
+  getHomeEntity(entityId) {
+    const db = getMasterDb();
+    const row = db.prepare('SELECT * FROM home_entities WHERE entity_id = ?').get(String(entityId).toLowerCase().trim());
+    if (!row) return null;
+    return {
+      ...row,
+      attributes: row.attributes_json ? JSON.parse(row.attributes_json) : {}
+    };
+  },
+
+  listHomeEntities(domain = null) {
+    const db = getMasterDb();
+    const rows = domain
+      ? db.prepare('SELECT * FROM home_entities WHERE domain = ? ORDER BY entity_id ASC').all(String(domain).toLowerCase())
+      : db.prepare('SELECT * FROM home_entities ORDER BY domain ASC, entity_id ASC').all();
+    return rows.map((r) => ({
+      ...r,
+      attributes: r.attributes_json ? JSON.parse(r.attributes_json) : {}
+    }));
+  },
+
+  updateHomeEntityState(entityId, newState, attributes = null) {
+    const db = getMasterDb();
+    const now = new Date().toISOString();
+    const cleanId = String(entityId).toLowerCase().trim();
+    const existing = this.getHomeEntity(cleanId);
+    if (!existing) return null;
+
+    const finalState = String(newState).trim();
+    const mergedAttrs = attributes ? { ...existing.attributes, ...attributes } : existing.attributes;
+
+    db.prepare(`
+      UPDATE home_entities
+      SET state = ?, attributes_json = ?, last_changed = ?, last_updated = ?
+      WHERE entity_id = ?
+    `).run(
+      finalState,
+      JSON.stringify(mergedAttrs),
+      finalState !== existing.state ? now : existing.last_changed,
+      now,
+      cleanId
+    );
+
+    notifyDriveSync();
+    return this.getHomeEntity(cleanId);
+  },
+
+  getHomeScene(sceneId) {
+    const db = getMasterDb();
+    const row = db.prepare('SELECT * FROM home_scenes WHERE id = ?').get(String(sceneId).toLowerCase().trim());
+    if (!row) return null;
+    return {
+      ...row,
+      actions: row.actions_json ? JSON.parse(row.actions_json) : []
+    };
+  },
+
+  listHomeScenes() {
+    const db = getMasterDb();
+    const rows = db.prepare('SELECT * FROM home_scenes ORDER BY id ASC').all();
+    return rows.map((r) => ({
+      ...r,
+      actions: r.actions_json ? JSON.parse(r.actions_json) : []
+    }));
+  },
+
+  logHomeEvent({ entityId, service, caller = 'telegram_bot', status = 'ok', details = '' }) {
+    const db = getMasterDb();
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO home_events_log (entity_id, service, caller, status, details, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      String(entityId),
+      String(service),
+      String(caller || 'telegram_bot'),
+      String(status || 'ok'),
+      String(details || ''),
+      now
+    );
+  },
+
+  getHomeSummary() {
+    const db = getMasterDb();
+    const lightsOn = db.prepare("SELECT COUNT(*) as c FROM home_entities WHERE domain = 'light' AND state = 'on'").get()?.c || 0;
+    const totalLights = db.prepare("SELECT COUNT(*) as c FROM home_entities WHERE domain = 'light'").get()?.c || 0;
+    const tempSensor = db.prepare("SELECT state FROM home_entities WHERE entity_id = 'sensor.temperatura_quarto_carolina'").get();
+    const humSensor = db.prepare("SELECT state FROM home_entities WHERE entity_id = 'sensor.humidade_quarto_carolina'").get();
+    const doorSensor = db.prepare("SELECT state FROM home_entities WHERE entity_id = 'binary_sensor.porta_entrada'").get();
+    const recentEvents = db.prepare("SELECT * FROM home_events_log ORDER BY id DESC LIMIT 5").all();
+
+    return {
+      lightsOn,
+      totalLights,
+      babyRoomTemp: tempSensor?.state || '20.4',
+      babyRoomHumidity: humSensor?.state || '52',
+      doorOpen: doorSensor?.state === 'on',
+      recentEventsCount: recentEvents.length,
+      lastEvent: recentEvents[0] || null
+    };
+  },
+
+  // ─── IA-NUTRICIONISTA (AVALIAÇÃO VISUAL & CLÍNICA ADR-044) ────────────────
+  saveVisualEvaluation({
+    id,
+    userId = 'default_user',
+    imageSource = 'telegram_photo',
+    mealType = 'refeição',
+    foodsDetected = [],
+    totalProtein = 0,
+    totalCalories = 0,
+    totalCarbs = 0,
+    totalFat = 0,
+    feedback = '',
+    recordedToLog = 0
+  }) {
+    const db = getMasterDb();
+    const now = new Date().toISOString();
+    const evalId = id || `eval_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const foodsJson = Array.isArray(foodsDetected) ? JSON.stringify(foodsDetected) : String(foodsDetected);
+
+    db.prepare(`
+      INSERT OR REPLACE INTO nutrition_visual_evaluations (
+        id, user_id, image_source, meal_type, foods_detected_json,
+        total_protein, total_calories, total_carbs, total_fat,
+        nutritionist_feedback, recorded_to_log, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      evalId,
+      String(userId),
+      String(imageSource),
+      String(mealType),
+      foodsJson,
+      Number(totalProtein) || 0,
+      Number(totalCalories) || 0,
+      Number(totalCarbs) || 0,
+      Number(totalFat) || 0,
+      String(feedback || ''),
+      recordedToLog ? 1 : 0,
+      now
+    );
+
+    notifyDriveSync();
+    return this.getVisualEvaluation(evalId);
+  },
+
+  getVisualEvaluation(id) {
+    const db = getMasterDb();
+    const row = db.prepare('SELECT * FROM nutrition_visual_evaluations WHERE id = ?').get(String(id));
+    if (!row) return null;
+    return {
+      ...row,
+      feedback: row.nutritionist_feedback,
+      foodsDetected: row.foods_detected_json ? JSON.parse(row.foods_detected_json) : []
+    };
+  },
+
+  listVisualEvaluations(userId = 'default_user', limit = 10) {
+    const db = getMasterDb();
+    const rows = db.prepare(`
+      SELECT * FROM nutrition_visual_evaluations
+      WHERE user_id = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(String(userId), Number(limit));
+
+    return rows.map((r) => ({
+      ...r,
+      foodsDetected: r.foods_detected_json ? JSON.parse(r.foods_detected_json) : []
+    }));
+  },
+
+  getDietTip(category = null) {
+    const db = getMasterDb();
+    if (category) {
+      return db.prepare('SELECT * FROM nutrition_diet_tips WHERE category = ? ORDER BY RANDOM() LIMIT 1').get(String(category));
+    }
+    return db.prepare('SELECT * FROM nutrition_diet_tips ORDER BY RANDOM() LIMIT 1').get();
+  },
+
+  listDietTips() {
+    const db = getMasterDb();
+    return db.prepare('SELECT * FROM nutrition_diet_tips ORDER BY id ASC').all();
   },
 
   // ─── ESTATÍSTICAS GERAIS & DIAGNÓSTICO ──────────────────────────────────────

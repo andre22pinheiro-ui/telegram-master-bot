@@ -463,6 +463,33 @@ async function main() {
       assert(msgComer.includes('Consumo Registado'), 'handleComer deve registar consumo com sucesso');
     });
 
+    await runTest('NUT-04', 'IA-Nutricionista (Asimov Academy): Análise de Prato, Macros, Dicas e Confirmação de Diário', async () => {
+      const { default: iaNutri } = await import('../src/services/iaNutricionistaService.js');
+      const testUserId = `battery_user_${Date.now()}`;
+      const ctx = { chat: { id: testUserId }, from: { id: testUserId, first_name: 'André' } };
+
+      // 1. Menu Geral
+      const menu = await workerNutricao.handle('/ia_nutricionista', ctx);
+      assert(menu.includes('IA-NUTRICIONISTA') && menu.includes('/analisar_refeicao'), '/ia_nutricionista deve exibir menu de funcionalidades');
+
+      // 2. Análise de Refeição Visual / Heurística
+      const analise = await workerNutricao.handle('/analisar_refeicao 200g peito de frango com 150g arroz e brocolos', ctx);
+      assert(analise.includes('ANÁLISE NUTRICIONAL DO PRATO') && analise.includes('Proteína:'), '/analisar_refeicao deve devolver macros e porções');
+      assert(analise.includes('/confirmar_refeicao'), 'Deve incluir comando para confirmar refeição');
+
+      // 3. Extrair ID da avaliação e confirmar registo
+      const idMatch = analise.match(/\/confirmar_refeicao\s+(eval_\w+)/);
+      assert(idMatch && idMatch[1], 'Deve conter ID de avaliação válido');
+      const evalId = idMatch[1];
+
+      const confirmOut = await workerNutricao.handle(`/confirmar_refeicao ${evalId}`, ctx);
+      assert(confirmOut.includes('Refeição Registada com Sucesso'), 'confirmar_refeicao deve somar ao diário');
+
+      // 4. Dúvida / Dica Clínica
+      const dicaOut = await workerNutricao.handle('/dica_nutricao timing', ctx);
+      assert(dicaOut.includes('DICA DO NUTRICIONISTA') && dicaOut.includes('Leucine'), '/dica_nutricao deve devolver recomendação baseada em evidência');
+    });
+
     // ─── MÓDULO 6: CMVM Imobiliário, Apple Comparação & Filtros /vigiar ───────
     console.log('\n📡 MÓDULO 6: Radar 5 Frentes, CMVM & Filtros /vigiar');
 
@@ -653,6 +680,130 @@ async function main() {
       assert(directCmd.includes('Ideia Open-Source Absorvida com Sucesso'), '/absorver_ideia deve responder com sucesso');
     });
 
+    await runTest('DEV-04', 'Free-TV / IPTV: Catálogo canónico legal, HLS streams e comando /tv', async () => {
+      const { default: iptvService } = await import('../src/services/iptvService.js');
+      assert(iptvService.FREE_CHANNELS.length >= 10, 'Deve ter pelo menos 10 canais abertos legais curados');
+      const ctx = { chat: { id: 950415577 }, from: { id: 950415577, first_name: 'André' } };
+      const tvCatalog = await workerDev.handle('/tv', ctx);
+      assert(tvCatalog.includes('Free-TV / IPTV') && tvCatalog.includes('RTP 1'), '/tv deve devolver catálogo de canais legais');
+      const tvRtp1 = await workerDev.handle('/tv rtp1', ctx);
+      assert(tvRtp1.includes('RTP 1') && tvRtp1.includes('.m3u8'), '/tv rtp1 deve devolver o stream direto');
+      const m3u = iptvService.generateM3uContent();
+      assert(m3u.startsWith('#EXTM3U') && m3u.includes('https://streaming-live.rtp.pt'), 'generateM3uContent deve produzir playlist válida');
+    });
+
+    await runTest('DEV-05', 'Obsidian Skills: Formatação Markdown, JSON Canvas (.canvas) e exportação de Vault', async () => {
+      const { default: obsidianService } = await import('../src/services/obsidianService.js');
+      const ctx = { chat: { id: 950415577 }, from: { id: 950415577, first_name: 'André' } };
+      const menu = await workerDev.handle('/obsidian', ctx);
+      assert(menu.includes('Integração Obsidian') && menu.includes('/obsidian export'), '/obsidian deve exibir menu com comandos');
+      const canvasOut = await workerDev.handle('/canvas', ctx);
+      assert(canvasOut.includes('JSON Canvas do Ecossistema') && canvasOut.includes('node-master-hub'), '/canvas deve gerar visual JSON Canvas');
+      const vault = obsidianService.exportSecondBrainToObsidianVault();
+      assert(vault.length === 5, 'exportSecondBrainToObsidianVault deve produzir exatamente 5 ficheiros canónicos');
+    });
+
+    await runTest('DEV-06', 'Hindsight Memory: Retain, Recall, Reflect e Bancos Particionados (ADR-044)', async () => {
+      const { default: hindsight } = await import('../src/services/hindsightMemoryService.js');
+      const banks = hindsight.listBanks();
+      assert(banks.length >= 4, 'Deve conter pelo menos os 4 bancos canónicos');
+      const ctx = { chat: { id: 950415577 }, from: { id: 950415577, first_name: 'André' } };
+      const menu = await workerDev.handle('/hindsight', ctx);
+      assert(menu.includes('Hindsight') && menu.includes('Retain'), '/hindsight deve devolver menu com as 3 operações');
+      const rRetain = await workerDev.handle('/hindsight retain dev_cloud | Deploy do Render testado com sucesso', ctx);
+      assert(rRetain.includes('Memória Retida com Sucesso'), 'Retain deve persistir com sucesso');
+      const rRecall = await workerDev.handle('/hindsight recall dev_cloud | Render', ctx);
+      assert(rRecall.includes('Memórias Evocadas'), 'Recall deve recuperar a memória persistida');
+    });
+
+    await runTest('DEV-07', 'Projeto NOMAD: Conhecimento Offline, Socorro SBV, Kit 72h e CyberChef (ADR-044)', async () => {
+      const { default: nomad } = await import('../src/services/nomadKnowledgeService.js');
+      assert(nomad.EMERGENCY_CONTACTS.length >= 5, 'Deve conter lista de contactos de emergência');
+      const ctx = { chat: { id: 950415577 }, from: { id: 950415577, first_name: 'André' } };
+      const menu = await workerDev.handle('/nomad', ctx);
+      assert(menu.includes('Projeto NOMAD') && menu.includes('/nomad socorro'), '/nomad deve exibir menu de resiliência');
+      const sbvOut = await workerDev.handle('/socorro sbv', ctx);
+      assert(sbvOut.includes('Suporte Básico de Vida') && sbvOut.includes('30 compressões'), '/socorro sbv deve detalhar procedimento 30:2');
+      const kitOut = await workerDev.handle('/kit72h', ctx);
+      assert(kitOut.includes('Kit de Emergência 72 Horas'), '/kit72h deve listar itens do kit');
+      const hashOut = await workerDev.handle('/hash teste', ctx);
+      assert(hashOut.includes('46070d4bf934fb0d4b06d9e2c46e346944e322444900a435d7d9a95e6d7435f5'), '/hash deve calcular SHA-256');
+    });
+
+    await runTest('DEV-08', 'Agent-Reach: Zero-API-Fee Web Intelligence, Cache SQLite e Comandos (/reach, /read, /hn)', async () => {
+      const { default: reachService } = await import('../src/services/agentReachService.js');
+      const ctx = { chat: { id: 950415577 }, from: { id: 950415577, first_name: 'André' } };
+
+      // 1. Menu Geral
+      const menu = await workerDev.handle('/reach', ctx);
+      assert(menu.includes('AGENT-REACH') && menu.includes('/reach read'), '/reach deve exibir menu multi-plataforma');
+
+      // 2. Doctor / Diagnóstico com mock
+      const mockDoctorAxios = {
+        get: async () => ({ data: 'ok' })
+      };
+      const doc = await reachService.runAgentReachDoctor({ axiosClient: mockDoctorAxios });
+      assert(doc.ok === true && doc.healthyCount >= 5, 'Doctor deve reportar canais operacionais');
+      const docMsg = reachService.formatDoctorMarkdown(doc);
+      assert(docMsg.includes('DIAGNÓSTICO AGENT-REACH') && docMsg.includes('Web Reader'), 'Formatador Doctor deve exibir cabeçalho e canais');
+
+      // 3. Cache SQLite WAL
+      const testEnv = reachService.buildReachEnvelope({
+        platform: 'reddit',
+        query: 'battery-test',
+        title: 'Discussão sobre SQLite WAL',
+        author: 'u/tester',
+        score: 42,
+        snippet: 'Alta performance no Render',
+        status: 'success'
+      });
+      sqliteMasterDb.setCachedReach({
+        platform: 'reddit',
+        queryOrUrl: 'battery-test',
+        title: testEnv.title,
+        envelope: testEnv,
+        ttlSeconds: 120
+      });
+      const cached = sqliteMasterDb.getCachedReach('reddit', 'battery-test');
+      assert(cached && cached.cached === true && cached.title === 'Discussão sobre SQLite WAL', 'Cache SQLite deve retornar envelope com flag cached=true');
+
+      // 4. Execução de comandos no workerDev
+      const readHelp = await workerDev.handle('/read', ctx);
+      assert(readHelp.includes('/read <https://url>'), '/read sem argumentos deve devolver ajuda de sintaxe');
+
+      const redditCmd = await workerDev.handle('/reddit battery-test', ctx);
+      assert(redditCmd.includes('AGENT-REACH') && redditCmd.includes('REDDIT'), '/reddit deve recuperar e formatar dados');
+    });
+
+    await runTest('DEV-09', 'Home Assistant: Domótica Cloud-Native, Controlo de Luzes, Clima Carolina e Cenários (ADR-044)', async () => {
+      const { default: hassService } = await import('../src/services/homeAssistantService.js');
+      const ctx = { chat: { id: 950415577 }, from: { id: 950415577, first_name: 'André' } };
+
+      // 1. Painel Geral /casa
+      const casaOut = await workerDev.handle('/casa', ctx);
+      assert(casaOut.includes('PAINEL RESIDENCIAL & DOMÓTICA') && casaOut.includes('Quarto da Carolina'), '/casa deve exibir visão geral residencial');
+
+      // 2. Controlo de Iluminação /luz
+      const luzOut = await workerDev.handle('/luz sala on', ctx);
+      assert(luzOut.includes('Luz da Sala') && luzOut.includes('ON'), '/luz sala on deve ligar luz da sala');
+      const salaDb = sqliteMasterDb.getHomeEntity('light.sala');
+      assert(salaDb.state === 'on', 'Estado da luz da sala em SQLite deve ser on');
+
+      // 3. Clima Quarto Bebé /clima
+      const climaOut = await workerDev.handle('/clima bebe 20.5', ctx);
+      assert(climaOut.includes('Climatização Quarto Bebé') && climaOut.includes('20.5°C'), '/clima bebe deve atualizar temperatura');
+
+      // 4. Cenário /cenario noite
+      const cenarioOut = await workerDev.handle('/cenario noite', ctx);
+      assert(cenarioOut.includes('Modo Noturno (Descanso Bebé)') && cenarioOut.includes('Ações Executadas'), '/cenario noite deve ativar modo noturno');
+      const salaAfterNoite = sqliteMasterDb.getHomeEntity('light.sala');
+      assert(salaAfterNoite.state === 'off', 'Modo noite deve apagar luz da sala');
+
+      // 5. Monitor Conforto Bebé /carolina_quarto
+      const bebeOut = await workerDev.handle('/carolina_quarto', ctx);
+      assert(bebeOut.includes('MONITOR DE CONFORTO: QUARTO DA CAROLINA') && bebeOut.includes('Temperatura Atual'), '/carolina_quarto deve exibir métricas');
+    });
+
     await runTest('RADAR-02', 'Atalhos diretos /vigiar_amazon e /vigiar_apple criam filtros dedicados', async () => {
       const ctx = { chat: { id: 950415577 }, from: { id: 950415577, first_name: 'André' } };
       const amOut = await workerImmo.handle('/vigiar_amazon Garmin Forerunner 250', ctx);
@@ -680,9 +831,9 @@ async function main() {
       });
       assert(
         morning.includes('NOTÍCIAS IPMA + AMARANTE OK') &&
-          morning.includes('gasoleo') &&
-          morning.includes('1 email importante') &&
-          morning.includes('Comprar leite bebé'),
+        morning.includes('gasoleo') &&
+        morning.includes('1 email importante') &&
+        morning.includes('Comprar leite bebé'),
         'Briefing Matinal deve consolidar notícias, combustíveis, emails e tarefas'
       );
 
@@ -851,14 +1002,14 @@ async function main() {
         assert(actionMap.has(id), `Callback legado em falta no Master: ${id}`);
       }
 
-      await actionMap.get('immo_amarante')({ answerCbQuery: async () => {}, sendChatAction: async () => {} });
+      await actionMap.get('immo_amarante')({ answerCbQuery: async () => { }, sendChatAction: async () => { } });
       assert(sent.at(-1).text === 'MOCK_IMMO:/avaliacao 120 Amarante T3 bom', 'immo_amarante deve invocar avaliação Amarante');
 
-      await actionMap.get('frota_porto_lisboa')({ answerCbQuery: async () => {} });
+      await actionMap.get('frota_porto_lisboa')({ answerCbQuery: async () => { } });
       assert(sent.at(-1).text === FLEET_REDIRECT_MSG, 'frota_porto_lisboa no Master deve redirecionar com FLEET_REDIRECT_MSG');
       assert(JSON.stringify(sent.at(-1).extra).includes('zeropaperfrotaBot'), 'Botão inline deve apontar para @zeropaperfrotaBot');
 
-      const noop = async () => {};
+      const noop = async () => { };
       const bridges = createLegacyBridgeBots(
         {
           authMiddleware: async (_ctx, next) => next(),
@@ -955,7 +1106,7 @@ async function main() {
         webhookCallbacks: callbacks,
         renderUrl: 'https://telegram-master-bot-0h2h.onrender.com',
         usePolling: false,
-        sleepFn: async () => {}
+        sleepFn: async () => { }
       });
       assert(res2.reused === true && reusedSetCalls === 0, 'Deve reutilizar webhook já registado sem chamar setWebhook');
       assert(reuseBot.botInfo?.username === 'MasterReuseBot', 'mountBotTransport deve pré-carregar botInfo via getMe');
@@ -964,7 +1115,7 @@ async function main() {
       await callbacks.get('/webhook/master')({}, {
         headersSent: false,
         writeHead: (code) => { statusWritten = code; },
-        end: () => {}
+        end: () => { }
       });
       assert(statusWritten === 500, 'Erro síncrono/assíncrono no webhookCallback deve devolver 500 sem derrubar o servidor Node');
     });
@@ -1033,8 +1184,8 @@ async function main() {
       const yamlSrc = fs.readFileSync(path.join(ROOT_DIR, 'render.yaml'), 'utf-8');
       assert(
         yamlSrc.includes('telegram-master-bot-0h2h.onrender.com') &&
-          !yamlSrc.includes('name: zeropaper-frota-bot') &&
-          !yamlSrc.includes('17bj'),
+        !yamlSrc.includes('name: zeropaper-frota-bot') &&
+        !yamlSrc.includes('17bj'),
         'render.yaml do Master deve gerir apenas telegram-master-bot (0h2h) sem duplicar zeropaper-frota-bot nem 17bj'
       );
     });

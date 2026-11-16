@@ -26,19 +26,19 @@ const WORK_FLEET_PATTERNS = [
 
 const PATTERNS = {
   NUTRICAO: [
-    /^\/(plano|hoje|proteina|agua|creatina|nutricao|dieta|macros|receita|receita_airfryer|receita_mcc|comer|foto_refeicao|foto_rotulo|diario_alimentar|resumo_nutricional|consumo_agua|metas_nutricionais|adicionar_compra|foto_compra|comprado|historico_compras|produtos_frequentes|mais_consumidos|mais_comprados|corrigir_produto|eliminar_produto)\b/i,
-    /\b(prote[ií]na|creatina|macros?|calorias?|receita|air\s*fryer|monsieur\s+cuisine|\bmcc\b|lombo de porco|peito de frango|cottage|nestum)\b/i
+    /^\/(plano|hoje|proteina|agua|creatina|nutricao|dieta|macros|receita|receita_airfryer|receita_mcc|comer|foto_refeicao|foto_rotulo|diario_alimentar|resumo_nutricional|consumo_agua|metas_nutricionais|adicionar_compra|foto_compra|comprado|historico_compras|produtos_frequentes|mais_consumidos|mais_comprados|corrigir_produto|eliminar_produto|analisar_refeicao|confirmar_refeicao|duvida_nutricao|nutricionista|dica_nutricao|ia_nutricionista)\b/i,
+    /\b(prote[ií]na|creatina|macros?|calorias?|receita|air\s*fryer|monsieur\s+cuisine|\bmcc\b|lombo de porco|peito de frango|cottage|nestum|nutricionista|analisar\s+refei[cç][aã]o|foto\s+do\s+prato)\b/i
   ],
   IMMO: [
     /^\/(radar|casas|moradias?_novas?|novas?|moradias?|sites|relatorio|avaliacao|avaliar|alertas|carros?|tech|amazon|ofertas?|apple|iphone_preco|apple_refurb|vigiar|vigiar_amazon|vigiar_apple|meus_alertas)\b/i,
     /\b(moradia|apartamento|im[oó]vel|imobili[aá]ri|idealista|imovirtual|cmvm|standvirtual|piscapisca|carmine|pcdiga|globaldata|pccomponentes|wallapop|amazon\.es|segunda\s+mano|iphone|macbook|recondicionad|grau\s+a|iservices|swappie|back\s*market)\b/i
   ],
   DEV: [
-    /^\/(code|projetos?|criar_app|deploy|apps?|apks?|status_cloud|status_nuvem|print|screenshot|pc|pc_status|hardware|pc_sistema|compilar|build|pladur|erros?|self_refine|memoria|budget|absorver_ideia|radar_ideias|gerar_prompt_ideia)\b/i,
-    /\b(c[oó]digo|bug|erro|node\.?js|react|github(?:\s+actions)?|vercel|render|cloud\s*status|status\s+da\s+nuvem|telemetria\s+cloud|webhook|pc\s*surface|screenshot|ecr[aã]|compilar\s+apk|pladur|en\s*520|en\s*14195|divis[oó]ria|self[-\s]?refine|fts5|second\s*brain|token\s*budget|absorver\s*ideia|radar\s*de\s*ideias)\b/i
+    /^\/(code|projetos?|criar_app|deploy|apps?|apks?|status_cloud|status_nuvem|print|screenshot|pc|pc_status|hardware|pc_sistema|compilar|build|pladur|erros?|self_refine|memoria|budget|absorver_ideia|radar_ideias|gerar_prompt_ideia|tv|iptv|canais|canais_tv|obsidian|canvas|nota_obsidian|hindsight|memoria_v2|nomad|socorro|primeiros_socorros|kit72h|reach|agent_reach|read|hn|reddit|wiki|casa|domotica|hass|luz|luzes|clima|cenario|carolina_quarto)\b/i,
+    /\b(c[oó]digo|bug|erro|node\.?js|react|github(?:\s+actions)?|vercel|render|cloud\s*status|status\s+da\s+nuvem|telemetria\s+cloud|webhook|pc\s*surface|screenshot|ecr[aã]|compilar\s+apk|pladur|en\s*520|en\s*14195|divis[oó]ria|self[-\s]?refine|fts5|second\s*brain|token\s*budget|absorver\s*ideia|radar\s*de\s*ideias|iptv|m3u8?|canais\s+(?:abertos|tv)|obsidian|json\s*canvas|\.canvas|hindsight|biomim[eé]tic|project\s*nomad|primeiros\s*socorros|kit\s*72h|agent[-\s]?reach|zero[-\s]?api|jina\s*reader|dom[oó]tica|home\s*assistant|luz\s+da\s+sala|apagar\s+luzes|cen[aá]rio\s+noite)\b/i
   ],
   GERAL: [
-    /^\/(noticias|noticia|news|europa|noticias_regiao|amarante|governo|leis|codigo_estrada|sri|cadeirinha|dl84|agenda|evento|mapa|amarante_mapa|ergonomia|farmacias?|compras?|tarefas?|carolina|nota|notas|lembrete|lembretes|briefing|resumo|emails?|ler_email|resumo_email|email_status|pesquisa|google|combustiveis|gasoleo|gasolina|transito|tv|programacao)\b/i,
+    /^\/(noticias|noticia|news|europa|noticias_regiao|amarante|governo|leis|codigo_estrada|sri|cadeirinha|dl84|agenda|evento|mapa|amarante_mapa|ergonomia|farmacias?|compras?|tarefas?|carolina|nota|notas|lembrete|lembretes|briefing|resumo|emails?|ler_email|resumo_email|email_status|pesquisa|google|combustiveis|gasoleo|gasolina|transito|programacao)\b/i,
     /\b(not[ií]cias?|di[aá]rio\s+da\s+rep[uú]blica|portugal\.gov|ipma|prociv|farm[aá]cias?|email|inbox|correio|compras|supermercado|tarefa|carolina|escola|lembra-me|lembrar|daqui a \d+|amanh[aã]\s+[aà]s|nota:|combust[ií]veis|gas[oó]leo|tr[aâ]nsito|cadeirinha|c[oó]digo\s+da\s+estrada|dl\s*84\/2021)\b/i
   ]
 };

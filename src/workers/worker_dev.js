@@ -23,6 +23,12 @@ import {
 } from '../shared/selfRefineEngine.js';
 import { sqliteMasterDb } from '../shared/sqliteMasterDb.js';
 import { askAgent } from '../services/reasoningService.js';
+import iptvService from '../services/iptvService.js';
+import obsidianService from '../services/obsidianService.js';
+import hindsightMemoryService from '../services/hindsightMemoryService.js';
+import nomadKnowledgeService from '../services/nomadKnowledgeService.js';
+import agentReachService from '../services/agentReachService.js';
+import homeAssistantService from '../services/homeAssistantService.js';
 
 const log = createLogger('WorkerDevCloud');
 
@@ -315,13 +321,13 @@ export async function handle(text, ctx = {}) {
   const onBuildComplete =
     ctx?.telegram && chatId
       ? async (info) => {
-          await ctx.telegram
-            .sendMessage(
-              chatId,
-              `✅ *Build Cloud Concluída (${info.repo})!*\n• Resultado: *${info.conclusion}*\n🔗 ${info.htmlUrl}`
-            )
-            .catch(() => {});
-        }
+        await ctx.telegram
+          .sendMessage(
+            chatId,
+            `✅ *Build Cloud Concluída (${info.repo})!*\n• Resultado: *${info.conclusion}*\n🔗 ${info.htmlUrl}`
+          )
+          .catch(() => { });
+      }
       : null;
 
   const compilarCmdMatch = trimmed.match(/^\/(?:compilar|build)\s*(.*)$/i);
@@ -337,6 +343,397 @@ export async function handle(text, ctx = {}) {
   if (/^\/criar_app\b/i.test(lower)) return await createCloudRepoAndDeploy(trimmed.replace(/^\/criar_app\s*/i, ''));
   if (/^\/(apps?|links?|catalogo|catalogo_apps|vercel)\b/i.test(lower)) return await listVercelAppsOrDeployments();
   if (/^\/(apks?|download_apk|android)\b/i.test(lower)) return handleApks();
+
+  // ─── Free-TV / IPTV Canais Abertos (Adaptado de Free-TV/IPTV) ──────────────
+  if (/^\/(tv|iptv|canais|canais_tv)\b/i.test(lower)) {
+    const rawArgs = trimmed.replace(/^\/(?:tv|iptv|canais|canais_tv)\s*/i, '').trim();
+    if (!rawArgs || ['pt', 'news', 'todos', 'all'].includes(rawArgs.toLowerCase())) {
+      return iptvService.formatIptvCatalogMarkdown(rawArgs || 'pt');
+    }
+    if (rawArgs.toLowerCase() === 'check' || rawArgs.toLowerCase() === 'status') {
+      return await iptvService.runIptvHealthCheck();
+    }
+    return await iptvService.formatSingleChannelMarkdown(rawArgs);
+  }
+
+  // ─── Obsidian Skills & Visual Canvas (Adaptado de obsidianmd/obsidian-skills) ──
+  if (/^\/(obsidian|canvas|nota_obsidian)\b/i.test(lower)) {
+    const rawArgs = trimmed.replace(/^\/(?:obsidian|canvas|nota_obsidian)\s*/i, '').trim();
+    const subCmd = rawArgs.split(/\s+/)[0]?.toLowerCase();
+
+    if (lower.startsWith('/canvas') || subCmd === 'canvas') {
+      const canvasJson = obsidianService.generateEcosystemCanvas();
+      return (
+        `🎨 *JSON Canvas do Ecossistema (@AndrePinheirobot & Frotas)*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `Ficheiro visual gerado segundo a especificação aberta de **JSON Canvas** do Obsidian.\n\n` +
+        `\`\`\`json\n` +
+        `${canvasJson.slice(0, 1400)}...\n` +
+        `\`\`\`\n\n` +
+        `💡 _Para importar: Guarda com a extensão \`.canvas\` dentro do teu Obsidian Vault._`
+      );
+    }
+
+    if (subCmd === 'export' || subCmd === 'vault') {
+      const files = obsidianService.exportSecondBrainToObsidianVault();
+      let resp = `💎 *Exportação de Vault Obsidian Concluída*\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+      resp += `Foram gerados *${files.length} ficheiros* estruturados com Frontmatter YAML e Wikilinks:\n\n`;
+      files.forEach((f) => {
+        resp += `• 📄 *\`${f.filename}\`*\n`;
+      });
+      resp += `\n📌 *Primeiro ficheiro (Map of Content):*\n\`\`\`markdown\n`;
+      resp += `${files[0].content.slice(0, 600)}...\n\`\`\`\n`;
+      resp += `✅ _Estrutura pronta para leitura pelo Obsidian Desktop, Mobile ou CLI._`;
+      return resp;
+    }
+
+    if (lower.startsWith('/nota_obsidian') || subCmd === 'nota') {
+      const noteBody = rawArgs.replace(/^nota\s*/i, '').trim();
+      const parts = noteBody.split('|');
+      const title = parts[0]?.trim() || 'Nova Nota Obsidian';
+      const content = parts.slice(1).join('|').trim() || title;
+      const res = obsidianService.createAndSaveObsidianNote({
+        title,
+        content,
+        tags: ['segundo-cerebro', 'telegram'],
+        user: ctx.from?.first_name || 'André Pinheiro'
+      });
+      return (
+        `📝 *Nota Obsidian Guardada com Sucesso!*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• *Título:* \`${res.title}\`\n\n` +
+        `\`\`\`markdown\n${res.markdown.slice(0, 500)}...\n\`\`\`\n` +
+        `✅ _Guardada em SQLite WAL (\`pessoal_master.db\`) e sincronizada para backup._`
+      );
+    }
+
+    return obsidianService.formatObsidianMenuMarkdown();
+  }
+
+  // ─── Hindsight: Memória Biomimética (Retain, Recall, Reflect) ─────────────
+  if (/^\/(hindsight|memoria_v2)\b/i.test(lower)) {
+    const rawArgs = trimmed.replace(/^\/(?:hindsight|memoria_v2)\s*/i, '').trim();
+    const parts = rawArgs.split(/\s+/);
+    const subCmd = parts[0]?.toLowerCase();
+
+    if (subCmd === 'banks' || subCmd === 'bancos') {
+      const banks = hindsightMemoryService.listBanks();
+      let resp = `🏛️ *Bancos de Memória Hindsight (Particionados)*\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+      banks.forEach((b) => {
+        resp += `• \`${b.id}\` — *${b.name}* (${b.memory_count} memórias)\n  ↳ _${b.description}_\n`;
+      });
+      return resp;
+    }
+
+    if (subCmd === 'retain' || subCmd === 'guardar' || subCmd === 'aprender') {
+      const remainder = rawArgs.replace(/^(?:retain|guardar|aprender)\s*/i, '').trim();
+      const [bankPart, ...contentParts] = remainder.split('|');
+      const bankId = contentParts.length > 0 ? bankPart.trim() : 'pessoal_andre';
+      const content = contentParts.length > 0 ? contentParts.join('|').trim() : bankPart.trim();
+
+      if (!content) {
+        return `⚠️ *Uso correto:* \`/hindsight retain <banco> | <conteudo>\`\nExemplo: \`/hindsight retain pessoal_andre | Prefere correr ao fim da tarde\``;
+      }
+
+      const saved = hindsightMemoryService.retain({ bankId, content, confidence: 1.0 });
+      return (
+        `🧠 *Memória Retida com Sucesso (Retain)*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• *Banco:* \`${saved.bankId}\`\n` +
+        `• *ID:* \`${saved.id}\`\n` +
+        `• *Conteúdo:* _"${saved.content}"_\n` +
+        `• *Confiança:* \`${Math.round(saved.confidence * 100)}%\`\n` +
+        `✅ _Disponível imediatamente para evocação (Recall) e síntese (Reflect)._`
+      );
+    }
+
+    if (subCmd === 'recall' || subCmd === 'evocar' || subCmd === 'lembrar') {
+      const remainder = rawArgs.replace(/^(?:recall|evocar|lembrar)\s*/i, '').trim();
+      const [bankPart, ...queryParts] = remainder.split('|');
+      const bankId = queryParts.length > 0 ? bankPart.trim() : 'pessoal_andre';
+      const query = queryParts.length > 0 ? queryParts.join('|').trim() : bankPart.trim();
+
+      const results = hindsightMemoryService.recall({ bankId, query, limit: 5 });
+      if (results.length === 0) {
+        return `🔍 *Recall (${bankId}):* Nenhuma memória encontrada para "${query}".`;
+      }
+
+      let resp = `🔍 *Memórias Evocadas (Recall — ${bankId})*\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+      results.forEach((m, idx) => {
+        resp += `*${idx + 1}.* ${m.content}\n   ↳ Confiança: \`${Math.round(m.confidence * 100)}%\` | _${new Date(m.createdAt).toLocaleDateString('pt-PT')}_\n\n`;
+      });
+      return resp;
+    }
+
+    if (subCmd === 'reflect' || subCmd === 'refletir' || subCmd === 'sintetizar') {
+      const remainder = rawArgs.replace(/^(?:reflect|refletir|sintetizar)\s*/i, '').trim();
+      const [bankPart, ...queryParts] = remainder.split('|');
+      const bankId = queryParts.length > 0 ? bankPart.trim() : 'pessoal_andre';
+      const query = queryParts.length > 0 ? queryParts.join('|').trim() : bankPart.trim();
+
+      const res = await hindsightMemoryService.reflect({ bankId, query, chatId });
+      return (
+        `💡 *Síntese Cognitiva Hindsight (Reflect)*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• *Banco:* \`${res.bankId}\` | *Memórias Analisadas:* ${res.memoriesCount}\n` +
+        `• *Tema:* _"${res.query || 'Geral'}"_\n\n` +
+        `${res.reflection}`
+      );
+    }
+
+    return hindsightMemoryService.formatHindsightMenuMarkdown();
+  }
+
+  // ─── Projeto NOMAD: Conhecimento Offline & Resiliência (ADR-044) ───────────
+  if (/^\/(nomad|socorro|primeiros_socorros|kit72h|hash|b64)\b/i.test(lower)) {
+    if (lower.startsWith('/socorro') || lower.startsWith('/primeiros_socorros')) {
+      const proc = trimmed.replace(/^\/(?:socorro|primeiros_socorros)\s*/i, '').trim();
+      return nomadKnowledgeService.formatFirstAidMarkdown(proc);
+    }
+    if (lower.startsWith('/kit72h')) {
+      return nomadKnowledgeService.formatKit72hMarkdown();
+    }
+    if (lower.startsWith('/hash')) {
+      const val = trimmed.replace(/^\/hash\s*/i, '').trim();
+      return nomadKnowledgeService.runCyberChefTool('sha256', val);
+    }
+    if (lower.startsWith('/b64')) {
+      const val = trimmed.replace(/^\/b64\s*/i, '').trim();
+      return nomadKnowledgeService.runCyberChefTool('b64enc', val);
+    }
+
+    const rawArgs = trimmed.replace(/^\/nomad\s*/i, '').trim();
+    const parts = rawArgs.split(/\s+/);
+    const subCmd = parts[0]?.toLowerCase();
+
+    if (subCmd === 'socorro' || subCmd === 'ajuda' || subCmd === 'sbv') {
+      return nomadKnowledgeService.formatFirstAidMarkdown(parts[1] || '');
+    }
+    if (subCmd === 'kit' || subCmd === '72h') {
+      return nomadKnowledgeService.formatKit72hMarkdown();
+    }
+    if (subCmd === 'contactos' || subCmd === 'contacto' || subCmd === 'emergencia') {
+      return nomadKnowledgeService.formatEmergencyContactsMarkdown();
+    }
+    if (subCmd === 'map' || subCmd === 'mapas' || subCmd === 'pontos') {
+      return nomadKnowledgeService.formatNomadMapPointsMarkdown();
+    }
+    if (subCmd === 'tools' || subCmd === 'cyberchef') {
+      const tool = parts[1] || '';
+      const input = parts.slice(2).join(' ');
+      return nomadKnowledgeService.runCyberChefTool(tool, input);
+    }
+
+    return nomadKnowledgeService.formatNomadMenuMarkdown();
+  }
+
+  // ─── Agent-Reach: Inteligência Web Zero-API-Fee (ADR-044) ────────────────
+  if (/^\/(reach|agent_reach|read|hn|reddit|wiki)\b/i.test(lower)) {
+    // Atalhos diretos
+    if (lower.startsWith('/read')) {
+      const url = trimmed.replace(/^\/read\s*/i, '').trim();
+      if (!url) return '⚠️ *Uso correto:* `/read <https://url>`';
+      const env = await agentReachService.readWebPage(url);
+      return agentReachService.formatReachEnvelopeMarkdown(env);
+    }
+    if (lower.startsWith('/hn')) {
+      const env = await agentReachService.getHackerNewsTop({ limit: 5 });
+      return agentReachService.formatReachEnvelopeMarkdown(env);
+    }
+    if (lower.startsWith('/reddit')) {
+      const q = trimmed.replace(/^\/reddit\s*/i, '').trim();
+      if (!q) return '⚠️ *Uso correto:* `/reddit <pesquisa>`';
+      const env = await agentReachService.searchReddit(q);
+      return agentReachService.formatReachEnvelopeMarkdown(env);
+    }
+    if (lower.startsWith('/wiki')) {
+      const q = trimmed.replace(/^\/wiki\s*/i, '').trim();
+      if (!q) return '⚠️ *Uso correto:* `/wiki <pesquisa>`';
+      const env = await agentReachService.searchWikipedia(q);
+      return agentReachService.formatReachEnvelopeMarkdown(env);
+    }
+
+    // Comando unificado /reach [canal] [argumento]
+    const rawArgs = trimmed.replace(/^\/(?:reach|agent_reach)\s*/i, '').trim();
+    if (!rawArgs) {
+      return agentReachService.formatReachMenuMarkdown();
+    }
+
+    const parts = rawArgs.split(/\s+/);
+    const subCmd = parts[0]?.toLowerCase();
+    const queryPart = parts.slice(1).join(' ').trim();
+
+    if (subCmd === 'doctor' || subCmd === 'status' || subCmd === 'diag') {
+      const doc = await agentReachService.runAgentReachDoctor();
+      return agentReachService.formatDoctorMarkdown(doc);
+    }
+
+    if (subCmd === 'read' || subCmd === 'web') {
+      if (!queryPart) return '⚠️ *Uso correto:* `/reach read <https://url>`';
+      const env = await agentReachService.readWebPage(queryPart);
+      return agentReachService.formatReachEnvelopeMarkdown(env);
+    }
+
+    if (subCmd === 'reddit') {
+      if (!queryPart) return '⚠️ *Uso correto:* `/reach reddit <pesquisa>`';
+      const env = await agentReachService.searchReddit(queryPart);
+      return agentReachService.formatReachEnvelopeMarkdown(env);
+    }
+
+    if (subCmd === 'hn' || subCmd === 'hackernews') {
+      const env = await agentReachService.getHackerNewsTop({ limit: 5 });
+      return agentReachService.formatReachEnvelopeMarkdown(env);
+    }
+
+    if (subCmd === 'gh' || subCmd === 'github') {
+      if (!queryPart) return '⚠️ *Uso correto:* `/reach gh <pesquisa>`';
+      const env = await agentReachService.searchGitHub(queryPart);
+      return agentReachService.formatReachEnvelopeMarkdown(env);
+    }
+
+    if (subCmd === 'yt' || subCmd === 'youtube') {
+      if (!queryPart) return '⚠️ *Uso correto:* `/reach yt <url_do_video>`';
+      const env = await agentReachService.getYouTubeMetadata(queryPart);
+      return agentReachService.formatReachEnvelopeMarkdown(env);
+    }
+
+    if (subCmd === 'wiki' || subCmd === 'wikipedia') {
+      if (!queryPart) return '⚠️ *Uso correto:* `/reach wiki <pesquisa>`';
+      const env = await agentReachService.searchWikipedia(queryPart);
+      return agentReachService.formatReachEnvelopeMarkdown(env);
+    }
+
+    // Fallback inteligente: se for URL lê a página, senão pesquisa
+    const env = await agentReachService.reach(subCmd, queryPart || subCmd);
+    return agentReachService.formatReachEnvelopeMarkdown(env);
+  }
+
+  // ─── Home Assistant: Domótica Residencial & Quarto da Carolina (ADR-044) ───
+  if (/^\/(casa|domotica|hass|luz|luzes|clima|cenario|carolina_quarto)\b/i.test(lower)) {
+    // Atalho direto: Visão Geral Residencial
+    if (lower === '/casa' || lower === '/domotica') {
+      return homeAssistantService.formatHomeOverviewMarkdown();
+    }
+
+    // Atalho direto: Conforto Quarto Carolina
+    if (lower === '/carolina_quarto') {
+      return homeAssistantService.formatBabyComfortMarkdown();
+    }
+
+    // Atalho direto: Controlo de Iluminação (/luz [sala|quarto|cozinha|tudo] [on|off|toggle])
+    if (lower.startsWith('/luz')) {
+      const raw = trimmed.replace(/^\/(?:luzes|luz)\s*/i, '').trim();
+      if (!raw) {
+        const lights = sqliteMasterDb.listHomeEntities('light');
+        let msg = `💡 *ESTADO DA ILUMINAÇÃO RESIDENCIAL*\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        lights.forEach((l) => {
+          const icon = l.state === 'on' ? '🟡' : '⚪';
+          msg += `${icon} *${l.friendly_name}:* \`${l.state.toUpperCase()}\` (\`${l.entity_id}\`)\n`;
+        });
+        msg += `\n_Uso: \`/luz sala on\` | \`/luz cozinha off\` | \`/luz tudo off\`_`;
+        return msg;
+      }
+
+      const parts = raw.split(/\s+/);
+      let target = 'sala';
+      let action = 'toggle';
+
+      if (['on', 'off', 'ligar', 'desligar', 'apagar', 'acender'].includes(parts[0].toLowerCase())) {
+        action = parts[0].toLowerCase();
+        target = parts[1] || 'sala';
+      } else {
+        target = parts[0];
+        action = parts[1] || 'toggle';
+      }
+
+      const res = await homeAssistantService.controlLight(target, action);
+      if (!res.success) return `⚠️ *Erro Domótica:* ${res.error}`;
+      if (res.all) {
+        return `💡 *Comando Geral Executado:*\nTodas as ${res.count} luzes foram alteradas para: \`${res.state.toUpperCase()}\`.`;
+      }
+      return `💡 *${res.entity.friendly_name}:* Estado alterado para \`${res.state.toUpperCase()}\` ✅`;
+    }
+
+    // Atalho direto: Controlo de Climatização (/clima [local] [temperatura])
+    if (lower.startsWith('/clima')) {
+      const raw = trimmed.replace(/^\/clima\s*/i, '').trim();
+      if (!raw) {
+        const baby = homeAssistantService.getBabyRoomComfortReport();
+        return (
+          `🌡️ *CLIMATIZAÇÃO RESIDENCIAL*\n━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `• *Quarto da Carolina:* \`${baby.temperature}°C\` (Alvo: \`${baby.targetTemp}°C\` | Modo: \`${baby.climateState}\`)\n` +
+          `• *Ar Condicionado Sala:* ${sqliteMasterDb.getHomeEntity('climate.sala')?.state.toUpperCase() || 'OFF'}\n\n` +
+          `_Uso: \`/clima 20.5\` | \`/clima sala 22\` | \`/clima bebe off\`_`
+        );
+      }
+
+      const parts = raw.split(/\s+/);
+      let target = 'bebe';
+      let temp = null;
+      let mode = null;
+
+      if (!isNaN(Number(parts[0]))) {
+        temp = Number(parts[0]);
+      } else {
+        target = parts[0];
+        if (parts[1]) {
+          if (!isNaN(Number(parts[1]))) temp = Number(parts[1]);
+          else mode = parts[1];
+        }
+      }
+
+      const res = await homeAssistantService.controlClimate(target, { targetTemperature: temp, hvacMode: mode });
+      if (!res.success) return `⚠️ *Erro Clima:* ${res.error}`;
+      return `🌡️ *${res.entity.friendly_name}:* Temperatura alvo \`${res.targetTemperature || res.entity.attributes.target_temperature}°C\` (Modo: \`${res.hvacMode}\`) ✅`;
+    }
+
+    // Atalho direto: Ativação de Cenário (/cenario <noite|bom_dia|sair|cinema>)
+    if (lower.startsWith('/cenario')) {
+      const sceneId = trimmed.replace(/^\/cenario\s*/i, '').trim();
+      if (!sceneId) {
+        const scenes = sqliteMasterDb.listHomeScenes();
+        let msg = `🎬 *CENÁRIOS RESIDENCIAIS DISPONÍVEIS*\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        scenes.forEach((s) => {
+          msg += `• \`/cenario ${s.id}\` — *${s.name}*\n  ↳ _${s.description}_\n`;
+        });
+        return msg;
+      }
+
+      const res = await homeAssistantService.triggerScene(sceneId);
+      if (!res.success) return `⚠️ *Erro Cenário:* ${res.error}`;
+      return (
+        `🎬 *Cenário Ativado com Sucesso!*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `• *Cenário:* *${res.scene.name}*\n` +
+        `• *Ações Executadas:* \`${res.actionsCount}\` dispositivos atualizados\n` +
+        `• *Descrição:* _${res.scene.description}_\n` +
+        `✅ _Ambiente configurado em SQLite WAL e propagado na nuvem._`
+      );
+    }
+
+    // Menu geral /hass
+    const rawArgs = trimmed.replace(/^\/hass\s*/i, '').trim();
+    if (!rawArgs) return homeAssistantService.formatHassMenuMarkdown();
+
+    const parts = rawArgs.split(/\s+/);
+    const subCmd = parts[0]?.toLowerCase();
+
+    if (subCmd === 'entidades' || subCmd === 'entities') {
+      const domain = parts[1] || null;
+      const entities = sqliteMasterDb.listHomeEntities(domain);
+      let msg = `🏠 *ENTIDADES REGISTADAS ${domain ? `[${domain.toUpperCase()}]` : ''}*\n━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+      entities.forEach((e) => {
+        msg += `• *${e.friendly_name}* (\`${e.entity_id}\`): \`${e.state}\` ${e.unit_of_measurement || ''}\n`;
+      });
+      return msg;
+    }
+
+    if (subCmd === 'baby' || subCmd === 'carolina') {
+      return homeAssistantService.formatBabyComfortMarkdown();
+    }
+
+    return homeAssistantService.formatHassMenuMarkdown();
+  }
 
   if (/^\/pladur\b/i.test(lower) || /\b(pladur|en\s*520|en\s*14195|divis[oó]ria\s+gesso)\b/i.test(lower)) {
     const areaMatch = trimmed.match(/(\d+(?:[.,]\d+)?)\s*(?:m2|m²)?/i);

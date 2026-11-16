@@ -22,6 +22,7 @@ import {
   updateProductDetails,
   deleteProduct
 } from '../services/nutritionCatalogService.js';
+import iaNutricionistaService from '../services/iaNutricionistaService.js';
 
 const log = createLogger('WorkerNutricao');
 const DAILY_PROTEIN_TARGET = 160;
@@ -310,15 +311,21 @@ export function handleComer(input, userId = 'default_user') {
   );
 }
 
-export function handleFotoRefeicao() {
+export async function handleFotoRefeicao(input = '', userId = 'default_user') {
+  const clean = String(input || '').trim();
+  if (clean) {
+    const evalData = await iaNutricionistaService.analyzeMealPhoto({ userCaption: clean, userId });
+    return iaNutricionistaService.formatMealAnalysisMarkdown(evalData);
+  }
   return (
-    `📸 *Registo Visual de Refeições (Gemini Vision Multimodal)*\n` +
+    `📸 *Registo Visual de Refeições (IA-Nutricionista Asimov Academy)*\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-    `Para registar uma refeição por fotografia:\n\n` +
+    `Para registar uma refeição por fotografia ou texto:\n\n` +
     `1. Envia uma fotografia do teu prato no chat.\n` +
-    `2. Coloca na legenda do envio: \`/foto_refeicao\` ou uma breve descrição dos alimentos.\n` +
-    `3. A IA analisará visualmente as proporções, calculará calorias e proteína (fatores de Atwater 4/4/9/2) e registará a refeição no teu diário alimentar!\n\n` +
-    `💡 _Em alternativa direta por texto:_ \`/comer 180g Salmão grelhado com brócolos\``
+    `2. Coloca na legenda do envio: \`/foto_refeicao\` ou a descrição dos alimentos (ex: \`/analisar_refeicao 200g frango com arroz\`).\n` +
+    `3. A IA identifica os alimentos, calcula porções em gramas e macronutrientes face à meta de 160g de proteína!\n` +
+    `4. Registo no diário alimentar com confirmação: \`/confirmar_refeicao <id>\`\n\n` +
+    `💡 _Exemplo rápido:_ \`/analisar_refeicao Frango 200g com arroz 150g e salada\``
   );
 }
 
@@ -841,8 +848,45 @@ export async function handle(text, ctx = {}) {
     return handleComer(trimmed.replace(/^\/comer\s*/i, '').trim(), chatId);
   }
 
-  if (/^\/foto_refeicao\b/i.test(trimmed)) {
-    return handleFotoRefeicao();
+  if (/^\/(analisar_refeicao|foto_refeicao)\b/i.test(trimmed)) {
+    const raw = trimmed.replace(/^\/(?:analisar_refeicao|foto_refeicao)\s*/i, '').trim();
+    return await handleFotoRefeicao(raw, chatId);
+  }
+
+  if (/^\/confirmar_refeicao\b/i.test(trimmed)) {
+    const id = trimmed.replace(/^\/confirmar_refeicao\s*/i, '').trim();
+    if (!id) return '⚠️ *Uso correto:* `/confirmar_refeicao <id_da_avaliacao>`';
+    const res = iaNutricionistaService.confirmMealEvaluation(id, chatId);
+    if (!res.success) return `⚠️ *Erro:* ${res.error}`;
+    return (
+      `✅ *Refeição Registada com Sucesso no Diário!*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `• *Proteína Creditada:* *+${res.totalProtein}g*\n` +
+      `• *Calorias:* *~${res.totalCalories} kcal*\n\n` +
+      `Consulta o teu progresso atual com \`/resumo_nutricional\` ou \`/hoje\`!`
+    );
+  }
+
+  if (/^\/(duvida_nutricao|nutricionista)\b/i.test(trimmed)) {
+    const q = trimmed.replace(/^\/(?:duvida_nutricao|nutricionista)\s*/i, '').trim();
+    return await iaNutricionistaService.askNutritionist(q, { userId: chatId });
+  }
+
+  if (/^\/dica_nutricao\b/i.test(trimmed)) {
+    const cat = trimmed.replace(/^\/dica_nutricao\s*/i, '').trim() || null;
+    const tip = sqliteMasterDb.getDietTip(cat);
+    if (!tip) return 'Sem dicas disponíveis no momento.';
+    return (
+      `💡 *DICA DO NUTRICIONISTA CLÍNICO: [${tip.category.toUpperCase()}]*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📌 *${tip.title}*\n\n` +
+      `${tip.content}\n\n` +
+      `🔒 _Diretrizes ISSN / EFSA (Meta diária de 160g de proteína)._`
+    );
+  }
+
+  if (/^\/ia_nutricionista\b/i.test(trimmed)) {
+    return iaNutricionistaService.formatNutricionistaMenuMarkdown();
   }
 
   if (/^\/foto_rotulo\b/i.test(trimmed)) {
